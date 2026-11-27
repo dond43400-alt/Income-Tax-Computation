@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="128" fill="#064e3b" />
+  <circle cx="256" cy="256" r="200" fill="#047857" opacity="0.4" />
+  <!-- Wheat / Plant Icon -->
+  <g fill="none" stroke="#fbbf24" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 420V120" />
+    <path d="M256 340c-40-20-60-60-60-100 40 0 60 40 60 100z" fill="#f59e0b" fill-opacity="0.3" />
+    <path d="M256 340c40-20 60-60 60-100-40 0-60 40-60 100z" fill="#f59e0b" fill-opacity="0.3" />
+    <path d="M256 250c-35-18-50-50-50-85 35 0 50 35 50 85z" fill="#fcd34d" fill-opacity="0.5" />
+    <path d="M256 250c35-18 50-50 50-85-35 0-50 35-50 85z" fill="#fcd34d" fill-opacity="0.5" />
+    <path d="M256 160c-25-15-38-40-38-70 25 0 38 30 38 70z" fill="#fde68a" />
+    <path d="M256 160c25-15 38-40 38-70-25 0-38 30-38 70z" fill="#fde68a" />
+  </g>
+  <!-- Text KISAN -->
+  <text x="256" y="470" font-family="system-ui, sans-serif" font-size="44" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="4">ਕਿਸਾਨ ਰਿਕਾਰਡ</text>
+</svg>

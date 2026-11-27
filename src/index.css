@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* Strict line containment & anti-overflow rules */
+.protect-table-container {
+  table-layout: fixed !important;
+  width: 100% !important;
+  border-collapse: collapse !important;
+  word-wrap: break-word !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+.protect-table-container th,
+.protect-table-container td {
+  overflow: hidden !important;
+  text-overflow: clip !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+
+.text-break-strict {
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+  white-space: normal !important;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 5mm 8mm;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    box-sizing: border-box !important;
+  }
+
+  html, body {
+    background-color: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+
+  header, footer, button, select, input, nav, .sidebar, iframe {
+    display: none !important;
+  }
+
+  #printable-computation {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    background-color: white !important;
+  }
+
+  .print-page {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+  }
+
+  .print-page table {
+    font-size: 9.5px !important;
+  }
+
+  .print-page tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .print-page th, 
+  .print-page td {
+    padding: 1.8px 4px !important;
+  }
+
+  .print-table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .print-table tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .print-table th, .print-table td {
+    border: 1px solid #94a3b8 !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+  }
+}
+

@@ -1,0 +1,6 @@
+{
+  "name": "ITR Tax Computation & PDF Extractor",
+  "description": "Professional ITR PDF data extractor and 1-page Tax Computation Sheet generator for Tax Consultants, CAs, and Tax Return Preparers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Kisan Record Master - ਸ਼ਾਹਕੋਟ ਖਾਦ ਤੇ ਕਿਸਾਨ ਰਿਕਾਰਡ",
+  "short_name": "Kisan Record",
+  "description": "ਸ਼ਾਹਕੋਟ ਤਹਿਸੀਲ ਕਿਸਾਨ ਰਿਕਾਰਡ ਅਤੇ ਖਾਦ (Urea/DAP/TSP/MOP) ਡਿਸਟ੍ਰੀਬਿਊਸ਼ਨ ਮੈਨੇਜਮੈਂਟ ਸੌਫਟਵੇਅਰ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#064e3b",
+  "theme_color": "#064e3b",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
