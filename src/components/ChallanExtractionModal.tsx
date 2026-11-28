@@ -202,6 +202,36 @@ export const ChallanExtractionModal: React.FC<ChallanExtractionModalProps> = ({
     }
   };
 
+  const compressImageDataUrl = (dataUrl: string): Promise<string> =>
+    new Promise((resolve) => {
+      if (dataUrl.length < 1_000_000) {
+        resolve(dataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1800;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = Math.min(maxDim / width, maxDim / height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+
   const handleFilesSelected = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const file = files[0];
@@ -217,7 +247,12 @@ export const ChallanExtractionModal: React.FC<ChallanExtractionModalProps> = ({
       if (file.name.toLowerCase().endsWith('.json') || file.type === 'application/json') {
         setStatusMessage('Parsing Income Tax JSON / AIS JSON file...');
         const text = await file.text();
-        const jsonRecords = extractChallansFromJsonContent(text, defaultPan, defaultName, defaultAy, file.name);
+        let jsonRecords: TaxChallanRecord[] = [];
+        try {
+          jsonRecords = extractChallansFromJsonContent(text, defaultPan, defaultName, defaultAy, file.name);
+        } catch {
+          throw new Error('Invalid JSON file. Please upload a valid Income Tax JSON, AIS JSON, or Challan PDF/image.');
+        }
         if (jsonRecords.length === 0) {
           setErrorMessage('No challan, TDS, TCS, or TaxPayment entries found in this JSON file.');
           setIsExtracting(false);
@@ -231,32 +266,66 @@ export const ChallanExtractionModal: React.FC<ChallanExtractionModalProps> = ({
       }
 
       // 2. Handle PDF or Image via PDF text + Gemini AI OCR
-      setStatusMessage('Reading document & running AI Challan OCR extraction...');
-      const dataUrl = await readFileAsDataUrl(file);
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       let rawText = '';
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        setStatusMessage('Extracting text layer & running Gemini AI OCR on PDF...');
+      let payloadFiles: Array<{ data: string; mimeType: string }> = [];
+
+      if (isPdf) {
+        setStatusMessage('Extracting text layer from PDF...');
         rawText = await extractTextFromPdf(file);
+        // Only send binary PDF when text layer is empty/scanned (< 80 chars) to avoid oversized payloads
+        if (rawText.trim().length < 80) {
+          if (file.size > 15 * 1024 * 1024) {
+            throw new Error('Scanned PDF is larger than 15 MB. Please upload a smaller PDF or clear photo of the challan.');
+          }
+          setStatusMessage('Scanned PDF detected — running AI visual OCR...');
+          const dataUrl = await readFileAsDataUrl(file);
+          payloadFiles = [{ data: dataUrl, mimeType: 'application/pdf' }];
+        } else {
+          setStatusMessage('Running AI Challan extraction on PDF text...');
+        }
+      } else {
+        setStatusMessage('Optimizing image & running AI Challan OCR extraction...');
+        const rawDataUrl = await readFileAsDataUrl(file);
+        const compressed = await compressImageDataUrl(rawDataUrl);
+        payloadFiles = [
+          {
+            data: compressed,
+            mimeType: compressed.startsWith('data:image/jpeg') ? 'image/jpeg' : (file.type || 'image/jpeg'),
+          },
+        ];
       }
 
       const payload: any = {
         fileName: file.name,
-        files: [
-          {
-            data: dataUrl,
-            mimeType: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
-          },
-        ],
+        files: payloadFiles,
         rawText,
       };
 
       const resp = await fetch('/api/ocr-challan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify(payload),
       });
 
-      const json = await resp.json();
+      const responseText = await resp.text();
+      let json: any;
+      try {
+        json = JSON.parse(responseText);
+      } catch {
+        console.error('Non-JSON response from /api/ocr-challan:', resp.status, responseText.slice(0, 300));
+        throw new Error(
+          resp.status === 413
+            ? 'Uploaded document is too large. Please upload a smaller PDF or compressed image.'
+            : resp.status >= 502 || responseText.startsWith('The page')
+              ? 'Server request timed out or returned a gateway error. Please retry with a smaller file or clearer image.'
+              : `Server returned an unexpected response (HTTP ${resp.status}).`
+        );
+      }
+
       if (!resp.ok || !json.success) {
         throw new Error(json.error || 'OCR extraction failed.');
       }

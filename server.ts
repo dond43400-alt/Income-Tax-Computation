@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
 async function startServer() {
   const app = express();
@@ -105,10 +105,8 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
 
       // Modern supported models from gemini-api SKILL.md
       const CANDIDATE_MODELS = [
-        "gemini-flash-latest",
+        "gemini-4-hydrogen",
         "gemini-3.1-flash-lite",
-        "gemini-3.7-flash",
-        "gemini-3.1-pro-preview",
       ];
 
       let lastError: any = null;
@@ -119,44 +117,54 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
             console.log(`Attempting OCR extraction using model: ${modelName} (Attempt ${attempt})...`);
-            const response = await ai.models.generateContent({
-              model: modelName,
-              contents: [
-                ...imageParts,
-                { text: systemPrompt },
-              ],
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING, description: "Full Name of client as on PAN/Aadhaar in UPPERCASE" },
-                    fatherName: { type: Type.STRING, description: "Father's Name in UPPERCASE" },
-                    pan: { type: Type.STRING, description: "10-digit PAN (e.g. HSIPK5617N) in UPPERCASE" },
-                    aadhaarNumber: { type: Type.STRING, description: "12-digit Aadhaar number formatted e.g. 1234 5678 9012" },
-                    dob: { type: Type.STRING, description: "Date of birth strictly in DD/MM/YYYY format" },
-                    gender: { type: Type.STRING, description: "Male or Female or Senior Citizen" },
-                    mobile: { type: Type.STRING, description: "Mobile number if visible" },
-                    email: { type: Type.STRING, description: "Email if visible" },
-                    address: { type: Type.STRING, description: "Complete residential address with Village, Tehsil, City, State, PIN" },
-                    pincode: { type: Type.STRING, description: "6-digit Pincode" },
-                    state: { type: Type.STRING, description: "State name in UPPERCASE" },
-                    bankName: { type: Type.STRING, description: "Bank Name" },
-                    accountNumber: { type: Type.STRING, description: "Bank Account Number" },
-                    ifscCode: { type: Type.STRING, description: "11-character Bank IFSC Code in UPPERCASE" },
-                    branchName: { type: Type.STRING, description: "Bank branch name" },
-                    placeOfFiling: { type: Type.STRING, description: "Town / City for signature & place of filing" },
-                    documentTypesDetected: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                      description: "List of documents detected in images (e.g. PAN Card, Aadhaar Card, Bank Passbook, Cheque)",
-                    },
-                    summaryNotes: { type: Type.STRING, description: "Short summary of extracted KYC & banking details" },
+            const config: any = {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING, description: "Full Name of client as on PAN/Aadhaar in UPPERCASE" },
+                  fatherName: { type: Type.STRING, description: "Father's Name in UPPERCASE" },
+                  pan: { type: Type.STRING, description: "10-digit PAN (e.g. HSIPK5617N) in UPPERCASE" },
+                  aadhaarNumber: { type: Type.STRING, description: "12-digit Aadhaar number formatted e.g. 1234 5678 9012" },
+                  dob: { type: Type.STRING, description: "Date of birth strictly in DD/MM/YYYY format" },
+                  gender: { type: Type.STRING, description: "Male or Female or Senior Citizen" },
+                  mobile: { type: Type.STRING, description: "Mobile number if visible" },
+                  email: { type: Type.STRING, description: "Email if visible" },
+                  address: { type: Type.STRING, description: "Complete residential address with Village, Tehsil, City, State, PIN" },
+                  pincode: { type: Type.STRING, description: "6-digit Pincode" },
+                  state: { type: Type.STRING, description: "State name in UPPERCASE" },
+                  bankName: { type: Type.STRING, description: "Bank Name" },
+                  accountNumber: { type: Type.STRING, description: "Bank Account Number" },
+                  ifscCode: { type: Type.STRING, description: "11-character Bank IFSC Code in UPPERCASE" },
+                  branchName: { type: Type.STRING, description: "Bank branch name" },
+                  placeOfFiling: { type: Type.STRING, description: "Town / City for signature & place of filing" },
+                  documentTypesDetected: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: "List of documents detected in images (e.g. PAN Card, Aadhaar Card, Bank Passbook, Cheque)",
                   },
-                  required: ["name"],
+                  summaryNotes: { type: Type.STRING, description: "Short summary of extracted KYC & banking details" },
                 },
+                required: ["name"],
               },
-            });
+            };
+            if (modelName === "gemini-4-hydrogen") {
+              config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+            }
+
+            const response: any = await Promise.race([
+              ai.models.generateContent({
+                model: modelName,
+                contents: [
+                  ...imageParts,
+                  { text: systemPrompt },
+                ],
+                config,
+              }),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Model ${modelName} timed out after 20s`)), 20000)
+              ),
+            ]);
 
             rawText = response.text || "{}";
             if (rawText && rawText.trim().length > 0) {
@@ -320,55 +328,65 @@ CRITICAL ACCURACY RULES (ZERO FABRICATION):
 
       for (const modelName of CHALLAN_MODELS) {
         try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: contentParts,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  detectedDocumentType: {
-                    type: Type.STRING,
-                    description: "e.g. Challan ITNS 280, Income Tax Payment Receipt, Form 26AS, AIS, TIS, ITR Acknowledgement",
-                  },
-                  extractionNotes: {
-                    type: Type.STRING,
-                    description: "Brief note on what was extracted or any unreadable fields",
-                  },
-                  challans: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        pan: { type: Type.STRING },
-                        assesseeName: { type: Type.STRING },
-                        assessmentYear: { type: Type.STRING },
-                        financialYear: { type: Type.STRING },
-                        paymentType: { type: Type.STRING },
-                        challanForm: { type: Type.STRING },
-                        bsrCode: { type: Type.STRING },
-                        challanSerialNumber: { type: Type.STRING },
-                        challanTenderDate: { type: Type.STRING },
-                        bankName: { type: Type.STRING },
-                        cin: { type: Type.STRING },
-                        taxAmount: { type: Type.NUMBER },
-                        surcharge: { type: Type.NUMBER },
-                        cess: { type: Type.NUMBER },
-                        interest: { type: Type.NUMBER },
-                        lateFilingFee: { type: Type.NUMBER },
-                        otherAmount: { type: Type.NUMBER },
-                        totalAmountPaid: { type: Type.NUMBER },
-                        paymentMode: { type: Type.STRING },
-                      },
-                      required: ["paymentType", "bsrCode", "challanSerialNumber", "challanTenderDate", "totalAmountPaid", "cin"],
+          const challanConfig: any = {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                detectedDocumentType: {
+                  type: Type.STRING,
+                  description: "e.g. Challan ITNS 280, Income Tax Payment Receipt, Form 26AS, AIS, TIS, ITR Acknowledgement",
+                },
+                extractionNotes: {
+                  type: Type.STRING,
+                  description: "Brief note on what was extracted or any unreadable fields",
+                },
+                challans: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      pan: { type: Type.STRING },
+                      assesseeName: { type: Type.STRING },
+                      assessmentYear: { type: Type.STRING },
+                      financialYear: { type: Type.STRING },
+                      paymentType: { type: Type.STRING },
+                      challanForm: { type: Type.STRING },
+                      bsrCode: { type: Type.STRING },
+                      challanSerialNumber: { type: Type.STRING },
+                      challanTenderDate: { type: Type.STRING },
+                      bankName: { type: Type.STRING },
+                      cin: { type: Type.STRING },
+                      taxAmount: { type: Type.NUMBER },
+                      surcharge: { type: Type.NUMBER },
+                      cess: { type: Type.NUMBER },
+                      interest: { type: Type.NUMBER },
+                      lateFilingFee: { type: Type.NUMBER },
+                      otherAmount: { type: Type.NUMBER },
+                      totalAmountPaid: { type: Type.NUMBER },
+                      paymentMode: { type: Type.STRING },
                     },
+                    required: ["paymentType", "bsrCode", "challanSerialNumber", "challanTenderDate", "totalAmountPaid", "cin"],
                   },
                 },
-                required: ["detectedDocumentType", "challans"],
               },
+              required: ["detectedDocumentType", "challans"],
             },
-          });
+          };
+          if (modelName === "gemini-4-hydrogen") {
+            challanConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          }
+
+          const response: any = await Promise.race([
+            ai.models.generateContent({
+              model: modelName,
+              contents: contentParts,
+              config: challanConfig,
+            }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Challan OCR model ${modelName} timed out after 20s`)), 20000)
+            ),
+          ]);
 
           rawJsonText = response.text || "{}";
           if (rawJsonText.trim().length > 0) {
@@ -401,6 +419,15 @@ CRITICAL ACCURACY RULES (ZERO FABRICATION):
         error: error.message || "Failed to extract challan details from document.",
       });
     }
+  });
+
+  // Ensure unknown /api/* routes return JSON 404 instead of falling through to SPA HTML
+  app.use("/api", (req, res, next) => {
+    if (res.headersSent) return next();
+    return res.status(404).json({
+      success: false,
+      error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+    });
   });
 
   // Global JSON Error Handler to ensure API routes always return JSON (never HTML)
