@@ -10,10 +10,13 @@ import { WhatsAppShareModal } from './components/WhatsAppShareModal';
 import { AiDocumentScannerModal } from './components/AiDocumentScannerModal';
 import { IncomeTaxPortalSyncModal } from './components/IncomeTaxPortalSyncModal';
 import { ManualClientModal } from './components/ManualClientModal';
-import { TaxComputation, FirmDetails, Language, TaxRegime } from './types';
+import { ChallanRegister } from './components/ChallanRegister';
+import { TaxComputation, FirmDetails, Language, TaxRegime, TaxChallanRecord } from './types';
 import { 
   loadSavedComputations, 
   saveComputations, 
+  loadStandaloneChallans,
+  saveStandaloneChallans,
   loadFirmDetails, 
   saveFirmDetails, 
   loadLanguage, 
@@ -25,9 +28,10 @@ export function App() {
   const [lang, setLang] = useState<Language>(loadLanguage());
   const [firm, setFirm] = useState<FirmDetails>(loadFirmDetails());
   const [computations, setComputations] = useState<TaxComputation[]>(loadSavedComputations());
+  const [standaloneChallans, setStandaloneChallans] = useState<TaxChallanRecord[]>(loadStandaloneChallans());
   
   // Navigation & Active Computation
-  const [currentTab, setCurrentTab] = useState<'upload' | 'sheet' | 'clients'>('sheet');
+  const [currentTab, setCurrentTab] = useState<'upload' | 'sheet' | 'clients' | 'challans'>('sheet');
   const [activeComputation, setActiveComputation] = useState<TaxComputation>(
     computations[0] || loadSavedComputations()[0]
   );
@@ -45,6 +49,10 @@ export function App() {
   useEffect(() => {
     saveComputations(computations);
   }, [computations]);
+
+  useEffect(() => {
+    saveStandaloneChallans(standaloneChallans);
+  }, [standaloneChallans]);
 
   useEffect(() => {
     saveFirmDetails(firm);
@@ -74,9 +82,11 @@ export function App() {
     setCurrentTab('sheet');
   };
 
-  // Update active computation
+  // Update any computation (syncs activeComputation if matching id)
   const handleUpdateComputation = (updated: TaxComputation) => {
-    setActiveComputation(updated);
+    if (activeComputation?.id === updated.id) {
+      setActiveComputation(updated);
+    }
     setComputations(prev => 
       prev.map(c => c.id === updated.id ? updated : c)
     );
@@ -118,6 +128,10 @@ export function App() {
         onOpenPortalSyncModal={() => setIsPortalSyncModalOpen(true)}
         onOpenManualClientModal={() => setIsManualModalOpen(true)}
         computations={computations}
+        totalChallansCount={
+          computations.reduce((sum, c) => sum + (c.taxesPaid?.challans?.length || 0), 0) +
+          standaloneChallans.length
+        }
         onExportAllExcel={() => exportClientListToExcel(computations)}
       />
 
@@ -157,6 +171,17 @@ export function App() {
             onDeleteComputation={handleDeleteComputation}
             onAddNew={() => setCurrentTab('upload')}
             onOpenManualClientModal={() => setIsManualModalOpen(true)}
+          />
+        )}
+
+        {currentTab === 'challans' && (
+          <ChallanRegister
+            computations={computations}
+            standaloneChallans={standaloneChallans}
+            firm={firm}
+            onUpdateComputation={handleUpdateComputation}
+            onUpdateStandaloneChallans={setStandaloneChallans}
+            onSelectComputation={handleSelectFromDirectory}
           />
         )}
       </main>

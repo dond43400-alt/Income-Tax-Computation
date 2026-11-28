@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { TaxComputation } from '../types';
+import { TaxComputation, TaxChallanRecord } from '../types';
 
 export function exportSingleComputationToExcel(comp: TaxComputation): void {
   const wb = XLSX.utils.book_new();
@@ -121,6 +121,36 @@ export function exportSingleComputationToExcel(comp: TaxComputation): void {
     XLSX.utils.book_append_sheet(wb, wsBs, 'Balance_Sheet');
   }
 
+  // 3. Challan Details Sheet (if challans exist)
+  if (comp.taxesPaid?.challans && comp.taxesPaid.challans.length > 0) {
+    const chRows = comp.taxesPaid.challans.map((ch, idx) => ({
+      'Sr No': idx + 1,
+      PAN: ch.pan,
+      'Assessee Name': ch.assesseeName,
+      'Assessment Year': ch.assessmentYear,
+      'Financial Year': ch.financialYear,
+      'Payment Category': ch.challanType,
+      'Challan Form': ch.challanForm || '',
+      'BSR Code': ch.bsrCode,
+      'Challan Serial No': ch.challanSerialNumber,
+      'Tender Date': ch.challanTenderDate,
+      'Bank Name': ch.bankName,
+      CIN: ch.cin,
+      'Tax Amount': ch.taxAmount,
+      Surcharge: ch.surcharge,
+      Cess: ch.cess,
+      Interest: ch.interest,
+      'Late Fee (234F)': ch.lateFilingFee,
+      'Other Amount': ch.otherAmount,
+      'Total Paid (INR)': ch.totalAmountPaid,
+      'Payment Mode': ch.paymentMode,
+      'Challan Status': ch.challanStatus,
+      'Verification Status': ch.verificationStatus,
+    }));
+    const wsCh = XLSX.utils.json_to_sheet(chRows);
+    XLSX.utils.book_append_sheet(wb, wsCh, 'Challan_Details');
+  }
+
   const safeName = comp.client.name.replace(/[^a-zA-Z0-9]/g, '_');
   XLSX.writeFile(wb, `Computation_${comp.client.pan}_${comp.assessmentYear}_${safeName}.xlsx`);
 }
@@ -160,3 +190,37 @@ export function exportClientListToExcel(computations: TaxComputation[]): void {
   XLSX.utils.book_append_sheet(wb, ws, 'Client ITR Register');
   XLSX.writeFile(wb, `ITR_Clients_Register_${new Date().toISOString().split('T')[0]}.xlsx`);
 }
+
+export function exportChallanRegisterToExcel(challans: TaxChallanRecord[]): void {
+  const rows = challans.map((ch, i) => ({
+    'Sr No': i + 1,
+    PAN: ch.pan,
+    'Assessee Name': ch.assesseeName,
+    'Assessment Year': ch.assessmentYear,
+    'Financial Year': ch.financialYear,
+    'Payment Category': ch.challanType,
+    'Challan Form': ch.challanForm || 'ITNS 280',
+    'BSR Code': ch.bsrCode,
+    'Challan Serial No': ch.challanSerialNumber,
+    'Tender Date': ch.challanTenderDate,
+    'Bank Name': ch.bankName,
+    CIN: ch.cin,
+    'Tax Amount': ch.taxAmount,
+    Surcharge: ch.surcharge,
+    Cess: ch.cess,
+    Interest: ch.interest,
+    'Late Filing Fee (234F)': ch.lateFilingFee,
+    'Other Amount': ch.otherAmount,
+    'Total Amount Paid': ch.totalAmountPaid,
+    'Payment Mode': ch.paymentMode,
+    'Challan Status': ch.challanStatus,
+    'Verification Status': ch.verificationStatus,
+    Evidence: ch.evidenceType || ch.sourceDocumentName || '',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Challan Register');
+  XLSX.writeFile(wb, `Challan_Register_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+

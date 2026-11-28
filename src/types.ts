@@ -541,12 +541,168 @@ export interface BalanceSheetDetails {
   notes?: string;
 }
 
+export type TaxPaymentCategory =
+  | 'Self Assessment Tax – u/s 140A'
+  | 'Advance Tax'
+  | 'Regular Assessment Tax – u/s 156'
+  | 'Tax on Regular Assessment'
+  | 'Late Filing Fee – u/s 234F'
+  | 'Interest u/s 234A'
+  | 'Interest u/s 234B'
+  | 'Interest u/s 234C'
+  | 'TDS'
+  | 'TCS'
+  | 'Other applicable tax payments';
+
+export type ChallanPaymentMode =
+  | 'Net Banking'
+  | 'UPI'
+  | 'Debit Card'
+  | 'RTGS / NEFT'
+  | 'Over the Counter (Bank)'
+  | 'Book Adjustment'
+  | 'Deducted at Source'
+  | 'Not Found'
+  | string;
+
+export type ChallanStatus =
+  | 'Deposited'
+  | 'Paid'
+  | 'Matched with 26AS'
+  | 'Pending'
+  | 'Mismatch'
+  | 'Reversed'
+  | 'Unverified';
+
+export type ChallanVerificationStatus =
+  | 'Verified'
+  | 'Unverified'
+  | 'Verification Required'
+  | 'Mismatch Flagged'
+  | 'Duplicate Flagged';
+
+export interface ChallanAuditEntry {
+  id: string;
+  timestamp: string;
+  action: 'Created' | 'Updated' | 'OCR Extracted' | 'Reconciled' | 'Verified' | 'Deleted' | 'Mismatch Flagged';
+  summary: string;
+  changes?: Array<{ field: string; oldValue: string; newValue: string }>;
+}
+
+export interface TaxChallanRecord {
+  id: string;
+  computationId?: string;
+  pan: string;
+  assesseeName: string;
+  assessmentYear: string;
+  financialYear: string;
+  challanType: TaxPaymentCategory;
+  challanForm?: string; // ITNS 280, ITNS 281, ITNS 282, ITNS 283, Form 26AS, etc.
+  challanSerialNumber: string; // Challan Number / Serial Number or 'Not Found'
+  bsrCode: string; // 7-digit BSR Code or 'Not Found'
+  challanTenderDate: string; // Payment/Tender Date or 'Not Found'
+  bankName: string; // Bank Name or 'Not Found'
+  cin: string; // Challan Identification Number or 'Not Found'
+  taxAmount: number;
+  surcharge: number;
+  cess: number;
+  interest: number;
+  lateFilingFee: number;
+  otherAmount: number;
+  totalAmountPaid: number;
+  paymentMode: ChallanPaymentMode;
+  challanStatus: ChallanStatus;
+  verificationStatus: ChallanVerificationStatus;
+  evidenceType?: string;
+  sourceDocumentName?: string;
+  isMatchedWith26AS?: boolean;
+  isDuplicateFlagged?: boolean;
+  mismatchReasons?: string[];
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  editHistory: ChallanAuditEntry[];
+}
+
+export interface LateFilingFee234FDetails {
+  assessmentYear: string;
+  originalDueDate: string;
+  actualFilingDate: string;
+  filingSection: string;
+  taxableIncome: number;
+  applicableFee: number;
+  manualFeeOverride?: number;
+  isAuditCase?: boolean;
+  amountActuallyPaid: number;
+  linkedChallanBsrCode: string;
+  linkedChallanSerialNumber: string;
+  linkedChallanDate: string;
+  paymentVerificationStatus: 'Verified' | 'Partially Paid' | 'Unpaid' | 'Verification Required' | 'Not Applicable';
+  ruleExplanation: string;
+}
+
+export type FinalSettlementOutcome =
+  | 'REFUND DUE'
+  | 'NO TAX PAYABLE / NO REFUND'
+  | 'ADDITIONAL TAX PAYABLE'
+  | 'PAYMENT VERIFICATION REQUIRED';
+
+export interface FinalSettlementSummary {
+  // A. Income Tax Calculation
+  totalIncome: number;
+  taxableIncome: number;
+  incomeTaxBeforeRebate: number;
+  rebate87A: number;
+  taxAfterRebate: number;
+  surcharge: number;
+  healthAndEducationCess: number;
+  relief89: number;
+  totalTaxLiability: number;
+
+  // B. Interest & Fees
+  interest234A: number;
+  interest234B: number;
+  interest234C: number;
+  fee234F: number;
+  otherLiabilities: number;
+  totalInterestAndFees: number;
+  totalGrossDemand: number;
+
+  // C. Taxes Already Paid
+  totalTDS: number;
+  totalTCS: number;
+  totalAdvanceTax: number;
+  totalSelfAssessmentTax: number;
+  totalRegularAssessmentTax: number;
+  totalOtherEligibleCredits: number;
+  totalEligibleTaxCredits: number;
+
+  // Non-creditable / Separate Fee & Interest Payments
+  totalLateFilingFeePaid: number;
+  totalInterestPaid: number;
+  totalAllPaymentsDeposited: number;
+  nonCreditableExcessFeePaid: number;
+
+  // D. Final Settlement
+  settlementStatus: FinalSettlementOutcome;
+  totalRefundDue: number;
+  additionalAmountPayable: number;
+  verificationIssues: string[];
+  reconciliationWarnings: string[];
+  breakdownSteps: Array<{ label: string; formula: string; amount: number; section?: string }>;
+}
+
 export interface TaxesPaidDetails {
   tdsSalary: number; // 192
   tdsOther: number; // 194A, 194C, 194J, etc.
   tcs: number; // 206C
   advanceTax: number;
   selfAssessmentTax: number; // 140A
+  regularAssessmentTax?: number; // u/s 156 / Tax on Regular Assessment
+  otherEligibleCredits?: number; // Other applicable eligible tax payments
+  lateFilingFeePaid?: number; // u/s 234F paid (tracked separately)
+  interestPaid?: number; // 234A/B/C paid via challans
+  challans?: TaxChallanRecord[];
   challanDetails?: Array<{
     bsrCode: string;
     challanNo: string;
@@ -605,10 +761,23 @@ export interface TaxComputation {
   interest234B: number;
   interest234C: number;
   fee234F: number; // Late filing fee
+  otherLiabilities?: number; // Other statutory liabilities / regular assessment demand
   totalTaxAndInterest: number;
   
   // Taxes Paid
   taxesPaid: TaxesPaidDetails;
+
+  // Late Filing Fee u/s 234F & Final Settlement Engine
+  lateFilingFeeDetails?: LateFilingFee234FDetails;
+  finalSettlement?: FinalSettlementSummary;
+  reconciliation26AS?: {
+    tdsAsPer26AS?: number;
+    tcsAsPer26AS?: number;
+    advanceTaxAsPer26AS?: number;
+    satAsPer26AS?: number;
+    lastReconciledAt?: string;
+    notes?: string;
+  };
   
   // Final Outcome
   netTaxPayable: number;

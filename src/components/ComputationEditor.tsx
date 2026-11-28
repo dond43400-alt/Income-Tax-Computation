@@ -3729,12 +3729,17 @@ export const ComputationEditor: React.FC<ComputationEditorProps> = ({
             </div>
           </div>
 
-          {/* Section 7: Taxes Paid (TDS / Advance Tax) */}
+          {/* Section 7: Taxes Paid (TDS / TCS / Advance / SAT) & Interest / Late Fee */}
           <div>
             <h4 className="font-bold text-[#10366b] text-xs uppercase tracking-wider mb-3 pb-1 border-b border-slate-200 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#10366b]"></span>
-              7. Taxes Paid / TDS Claimed
+              7. Taxes Paid, Credits &amp; Interest / Sec 234F Fee
             </h4>
+            {(formData.taxesPaid.challans && formData.taxesPaid.challans.length > 0) && (
+              <div className="mb-3 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-[11px] text-blue-900">
+                Note: This computation has <strong>{formData.taxesPaid.challans.length} itemized challan(s)</strong>. Category totals with active challans are automatically summed from those challan records on save to prevent double counting.
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
               <div>
                 <label className="block text-slate-600 mb-1 font-semibold">TDS on Salary (Form 16)</label>
@@ -3763,13 +3768,91 @@ export const ComputationEditor: React.FC<ComputationEditorProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-600 mb-1 font-semibold">Advance / Self Assessment Tax</label>
+                <label className="block text-slate-600 mb-1 font-semibold">TCS u/s 206C</label>
                 <input
                   type="number"
-                  value={(formData.taxesPaid.advanceTax || 0) + (formData.taxesPaid.selfAssessmentTax || 0) || ''}
+                  value={formData.taxesPaid.tcs || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    taxesPaid: { ...formData.taxesPaid, tcs: parseFloat(e.target.value) || 0 }
+                  })}
+                  className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-blue-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 mb-1 font-semibold">Advance Tax (u/s 208-211)</label>
+                <input
+                  type="number"
+                  value={formData.taxesPaid.advanceTax || ''}
                   onChange={(e) => setFormData({
                     ...formData,
                     taxesPaid: { ...formData.taxesPaid, advanceTax: parseFloat(e.target.value) || 0 }
+                  })}
+                  className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-blue-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 mb-1 font-semibold">Self Assessment Tax (u/s 140A)</label>
+                <input
+                  type="number"
+                  value={formData.taxesPaid.selfAssessmentTax || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    taxesPaid: { ...formData.taxesPaid, selfAssessmentTax: parseFloat(e.target.value) || 0 }
+                  })}
+                  className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-blue-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 mb-1 font-semibold">Regular Assessment Tax (u/s 156)</label>
+                <input
+                  type="number"
+                  value={formData.taxesPaid.regularAssessmentTax || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    taxesPaid: { ...formData.taxesPaid, regularAssessmentTax: parseFloat(e.target.value) || 0 }
+                  })}
+                  className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-blue-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 mb-1 font-semibold">Interest u/s 234A</label>
+                <input
+                  type="number"
+                  value={formData.interest234A || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    interest234A: parseFloat(e.target.value) || 0
+                  })}
+                  className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-blue-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 mb-1 font-semibold">Interest u/s 234B</label>
+                <input
+                  type="number"
+                  value={formData.interest234B || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    interest234B: parseFloat(e.target.value) || 0
+                  })}
+                  className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-blue-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 mb-1 font-semibold">Interest u/s 234C</label>
+                <input
+                  type="number"
+                  value={formData.interest234C || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    interest234C: parseFloat(e.target.value) || 0
                   })}
                   className="w-full p-2 border border-slate-300 rounded-lg outline-none focus:border-blue-600 font-mono"
                 />

@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { TaxComputation, FirmDetails, SalaryEntry } from '../types';
+import { TaxComputation, FirmDetails, SalaryEntry, TaxChallanRecord } from '../types';
+import { computeTaxPaymentSettlement, normalizeNotFound } from './challanEngine';
 
 export function formatINR(val?: number): string {
   if (val === undefined || isNaN(val)) return '₹0';
@@ -160,6 +161,10 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
     otherSourceRecordsFound = 1;
   }
 
+  const challanList = comp.taxesPaid?.challans || [];
+  const challanRecordsFound = challanList.length;
+  let challanRecordsPrinted = 0;
+
   // 2. PART A: PERSONAL & FILING INFORMATION
   const partAData: any[] = [
     [
@@ -214,7 +219,7 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
 
   autoTable(doc, {
     startY: currentY,
-    head: [[{ content: 'PART A: PERSONAL & FILING INFORMATION', colSpan: 4, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } }]],
+    head: [[{ content: 'PART A: ASSESSEE INFORMATION & FILING DETAILS', colSpan: 4, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } }]],
     body: partAData,
     theme: 'grid',
     styles: {
@@ -419,7 +424,7 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
       startY: currentY,
       head: [
         [
-          { content: 'PART B: PRESUMPTIVE BUSINESS INCOME (U/S 44AD / 44ADA)', colSpan: 4, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+          { content: 'PART B1: BUSINESS & PROFESSION TURNOVER BREAKDOWN (U/S 44AD / 44ADA)', colSpan: 4, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
         ],
         [
           'Business Description',
@@ -1056,7 +1061,7 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
     startY: currentY,
     head: [
       [
-        { content: 'PART C: COMPUTATION OF TOTAL TAXABLE INCOME', colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+        { content: 'PART B: INCOME COMPUTATION (HEAD-WISE & TOTAL TAXABLE INCOME)', colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
       ],
       [
         'Head of Income / Particulars',
@@ -1094,79 +1099,73 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
   // @ts-ignore
   currentY = doc.lastAutoTable.finalY + 2;
 
-  // 5. PART D: TAX COMPUTATION & DETAILED SLAB BREAKDOWN
+  // ============================================================================
+  // PART C: DETAILED TAX SLAB CALCULATION
+  // ============================================================================
   const slabThreshold = comp.assessmentYear === '2026-27' ? '0 TO ₹4,00,000 SLAB' : comp.regimeOpted === 'new' ? '0 TO ₹3,00,000 SLAB' : 'OLD REGIME SLAB';
-  const partDTitle = `PART D: TAX COMPUTATION & DETAILED SLAB BREAKDOWN (${slabThreshold})`;
+  const partCTitle = `PART C: DETAILED TAX SLAB CALCULATION (${slabThreshold})`;
 
-  const partDRows: any[] = [
+  const slabRows: any[] = [
     [
-      { content: 'Taxable Total Income', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
-      'Rounded off u/s 288A',
+      { content: 'Taxable Total Income (Rounded off u/s 288A)', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
+      'Base Income for Tax Computation',
       { content: formatPdfINR(comp.totalTaxableIncome), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
     ],
   ];
 
-  // Dynamic Slabs matching screenshot:
-  if (comp.assessmentYear === '2026-27') {
-    partDRows.push([
-      '• Income up to ₹4,00,000',
-      'NIL Exemption Limit',
-      '0',
-    ]);
+  if (comp.slabBreakdown && comp.slabBreakdown.length > 0) {
+    comp.slabBreakdown.forEach((item) => {
+      slabRows.push([
+        `• ${item.slab}`,
+        item.taxableInSlab > 0
+          ? `${item.rate} on ₹${Number(item.taxableInSlab).toLocaleString('en-IN')}`
+          : item.rate === 'Nil (0%)' ? 'NIL Exemption Limit' : item.rate,
+        formatPdfINR(item.tax),
+      ]);
+    });
+  } else if (comp.assessmentYear === '2026-27') {
+    slabRows.push(['• Income up to ₹4,00,000', 'NIL Exemption Limit', '0']);
     if (comp.totalTaxableIncome > 400000) {
       const taxableAbove4L = Math.min(comp.totalTaxableIncome - 400000, 400000);
-      const taxAbove4L = Math.round(taxableAbove4L * 0.05);
-      partDRows.push([
+      slabRows.push([
         `• Income above ₹4,00,000 to ₹${Number(comp.totalTaxableIncome).toLocaleString('en-IN')}`,
         `5% on ₹${Number(taxableAbove4L).toLocaleString('en-IN')}`,
-        formatPdfINR(taxAbove4L),
+        formatPdfINR(Math.round(taxableAbove4L * 0.05)),
       ]);
     }
     if (comp.totalTaxableIncome > 800000) {
       const taxableAbove8L = Math.min(comp.totalTaxableIncome - 800000, 400000);
-      const taxAbove8L = Math.round(taxableAbove8L * 0.10);
-      partDRows.push([
+      slabRows.push([
         `• Income above ₹8,00,000 to ₹${Number(comp.totalTaxableIncome).toLocaleString('en-IN')}`,
         `10% on ₹${Number(taxableAbove8L).toLocaleString('en-IN')}`,
-        formatPdfINR(taxAbove8L),
+        formatPdfINR(Math.round(taxableAbove8L * 0.10)),
       ]);
     }
   } else if (comp.regimeOpted === 'new') {
-    partDRows.push([
-      '• Income up to ₹3,00,000',
-      'NIL Exemption Limit',
-      '0',
-    ]);
+    slabRows.push(['• Income up to ₹3,00,000', 'NIL Exemption Limit', '0']);
     if (comp.totalTaxableIncome > 300000) {
       const taxableAbove3L = Math.min(comp.totalTaxableIncome - 300000, 400000);
-      const taxAbove3L = Math.round(taxableAbove3L * 0.05);
-      partDRows.push([
+      slabRows.push([
         `• Income above ₹3,00,000 to ₹${Number(comp.totalTaxableIncome).toLocaleString('en-IN')}`,
         `5% on ₹${Number(taxableAbove3L).toLocaleString('en-IN')}`,
-        formatPdfINR(taxAbove3L),
+        formatPdfINR(Math.round(taxableAbove3L * 0.05)),
       ]);
     }
   } else {
-    partDRows.push([
-      '• Income up to ₹2,50,000',
-      'NIL Exemption Limit',
-      '0',
-    ]);
+    slabRows.push(['• Income up to ₹2,50,000', 'NIL Exemption Limit', '0']);
     if (comp.totalTaxableIncome > 250000) {
       const taxableAbove25L = Math.min(comp.totalTaxableIncome - 250000, 250000);
-      const taxAbove25L = Math.round(taxableAbove25L * 0.05);
-      partDRows.push([
+      slabRows.push([
         `• Income above ₹2,50,000 to ₹${Number(comp.totalTaxableIncome).toLocaleString('en-IN')}`,
         `5% on ₹${Number(taxableAbove25L).toLocaleString('en-IN')}`,
-        formatPdfINR(taxAbove25L),
+        formatPdfINR(Math.round(taxableAbove25L * 0.05)),
       ]);
     }
   }
 
-  // Special Rate Tax Breakdown Rows in PDF
   if (comp.specialRateBreakdown && comp.specialRateBreakdown.length > 0) {
     comp.specialRateBreakdown.forEach((sItem) => {
-      partDRows.push([
+      slabRows.push([
         { content: `• ${sItem.section}: ${sItem.description} (₹${Number(sItem.income).toLocaleString('en-IN')})`, styles: { textColor: navyColor } },
         `Tax @ ${sItem.rate}`,
         formatPdfINR(sItem.tax),
@@ -1174,148 +1173,18 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
     });
   }
 
-  // Tax on Normal Income / Gross Tax
-  partDRows.push([
-    { content: 'GROSS TAX PAYABLE ON TOTAL INCOME', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
-    { content: comp.taxOnSpecialIncome ? `Normal: ₹${Number(comp.taxOnNormalIncome).toLocaleString('en-IN')} + Special: ₹${Number(comp.taxOnSpecialIncome).toLocaleString('en-IN')}` : 'Calculated Tax', styles: { fontStyle: 'bold' } },
-    { content: formatPdfINR(comp.totalTaxBeforeRebate || ((comp.taxOnNormalIncome || 0) + (comp.taxOnSpecialIncome || 0))), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
-  ]);
-
-  // Rebate 87A
-  const rebateMethod = comp.regimeOpted === 'new' 
-    ? (comp.assessmentYear?.includes('2026-27') ? 'Full Rebate u/s 115BAC (Up to ₹12L / Max ₹60,000)' : 'Full Rebate u/s 115BAC (Up to ₹7L / Max ₹25,000)')
-    : 'Rebate u/s 87A (Up to ₹5L / Max ₹12,500)';
-  partDRows.push([
-    'Less: Rebate u/s 87A',
-    rebateMethod,
-    formatPdfINR(comp.rebate87A),
-  ]);
-
-  // Tax Payable after rebate
-  partDRows.push([
-    { content: 'TAX PAYABLE AFTER REBATE', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
-    { content: 'Rebate Applied', styles: { fontStyle: 'bold' } },
-    { content: formatPdfINR(comp.taxAfterRebate), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
-  ]);
-
-  // Surcharge if applicable
-  if (Number(comp.surcharge) > 0) {
-    partDRows.push([
-      'Add: Surcharge',
-      'Applicable Surcharge Rate',
-      formatPdfINR(comp.surcharge),
-    ]);
-  }
-
-  // Cess
-  partDRows.push([
-    'Add: Health & Education Cess @ 4%',
-    '4% on Net Tax',
-    formatPdfINR(comp.healthAndEducationCess),
-  ]);
-
-  // Total Tax Liability
-  partDRows.push([
-    { content: 'TOTAL TAX LIABILITY', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
-    { content: 'Final Tax Payable', styles: { fontStyle: 'bold' } },
-    { content: formatPdfINR(comp.grossTaxLiability), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
-  ]);
-
-  // Taxes Paid Breakdown
-  partDRows.push([
-    { content: 'TAXES PAID & PREPAID CREDITS (SCHEDULE TDS / TCS / ADV / SAT)', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
-    '-',
-    { content: formatPdfINR(comp.taxesPaid.totalTaxesPaid), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
-  ]);
-
-  if (Number(comp.taxesPaid.tdsSalary) > 0 || (salaryEntries.some(e => Number(e.tdsSalary) > 0))) {
-    const totSalTds = Number(comp.taxesPaid.tdsSalary) || salaryEntries.reduce((s, e) => s + (Number(e.tdsSalary) || 0), 0);
-    partDRows.push([
-      { content: '   • TDS on Salary u/s 192 (As per Form 16 / 26AS)', styles: { textColor: navyColor } },
-      formatPdfINR(totSalTds),
-      '',
-    ]);
-    if (salaryEntries.length > 1) {
-      salaryEntries.forEach((e, i) => {
-        if (Number(e.tdsSalary) > 0) {
-          partDRows.push([
-            { content: `       - Employer ${i + 1}: ${e.employerName || 'Employer'}${e.employerTAN ? ` (TAN: ${e.employerTAN})` : ''}`, styles: { textColor: [71, 85, 105] as [number, number, number], fontSize: 6.2 } },
-            formatPdfINR(e.tdsSalary),
-            '',
-          ]);
-        }
-      });
-    }
-  }
-
-  if (Number(comp.taxesPaid.tdsOther) > 0) {
-    partDRows.push([
-      { content: '   • TDS Other than Salary (u/s 194A / 194C / 194J / 194Q etc.)', styles: { textColor: navyColor } },
-      formatPdfINR(comp.taxesPaid.tdsOther),
-      '',
-    ]);
-  }
-
-  if (Number(comp.taxesPaid.tcs) > 0) {
-    partDRows.push([
-      { content: '   • Tax Collected at Source (TCS u/s 206C)', styles: { textColor: navyColor } },
-      formatPdfINR(comp.taxesPaid.tcs),
-      '',
-    ]);
-  }
-
-  if (Number(comp.taxesPaid.advanceTax) > 0) {
-    partDRows.push([
-      { content: '   • Advance Tax Paid u/s 208-211', styles: { textColor: navyColor } },
-      formatPdfINR(comp.taxesPaid.advanceTax),
-      '',
-    ]);
-  }
-
-  if (Number(comp.taxesPaid.selfAssessmentTax) > 0) {
-    partDRows.push([
-      { content: '   • Self Assessment Tax Paid u/s 140A', styles: { textColor: navyColor } },
-      formatPdfINR(comp.taxesPaid.selfAssessmentTax),
-      '',
-    ]);
-  }
-
-  // Net Amount Payable / Refundable
-  const netAmount = comp.refundDue > 0 ? comp.refundDue : comp.netTaxPayable;
-  const netLabel = comp.refundDue > 0 ? 'NET REFUND DUE TO ASSESSEE (ROUNDED U/S 288B)' : 'NET TAX PAYABLE / (REFUNDABLE) (ROUNDED U/S 288B)';
-  partDRows.push([
-    { 
-      content: netLabel, 
-      styles: { 
-        fontStyle: 'bold', 
-        fillColor: [230, 240, 250] as [number, number, number], 
-        textColor: comp.refundDue > 0 ? [22, 101, 52] as [number, number, number] : [185, 28, 28] as [number, number, number], 
-        fontSize: 7.4 
-      } 
-    },
-    { 
-      content: '-', 
-      styles: { 
-        fillColor: [230, 240, 250] as [number, number, number] 
-      } 
-    },
-    { 
-      content: formatPdfINR(netAmount), 
-      styles: { 
-        fontStyle: 'bold', 
-        halign: 'right', 
-        fillColor: [230, 240, 250] as [number, number, number], 
-        textColor: comp.refundDue > 0 ? [22, 101, 52] as [number, number, number] : [185, 28, 28] as [number, number, number], 
-        fontSize: 7.4 
-      } 
-    },
+  const grossBeforeRebate = comp.totalTaxBeforeRebate || ((comp.taxOnNormalIncome || 0) + (comp.taxOnSpecialIncome || 0));
+  slabRows.push([
+    { content: 'GROSS TAX ON TOTAL INCOME (BEFORE REBATE)', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
+    { content: comp.taxOnSpecialIncome ? `Normal: ₹${Number(comp.taxOnNormalIncome).toLocaleString('en-IN')} + Special: ₹${Number(comp.taxOnSpecialIncome).toLocaleString('en-IN')}` : 'Slab Tax Calculated', styles: { fontStyle: 'bold' } },
+    { content: formatPdfINR(grossBeforeRebate), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
   ]);
 
   autoTable(doc, {
     startY: currentY,
     head: [
       [
-        { content: partDTitle, colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+        { content: partCTitle, colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
       ],
       [
         'Tax Slab / Particulars',
@@ -1323,37 +1192,479 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
         { content: 'Tax Amount (₹)', styles: { halign: 'right' } },
       ],
     ],
-    body: partDRows,
+    body: slabRows,
     theme: 'grid',
-    headStyles: {
-      fillColor: headerBgColor,
-      textColor: 255,
-      fontSize: 6.8,
-      fontStyle: 'bold',
-      cellPadding: 1.1,
-    },
-    styles: {
-      fontSize: 6.8,
-      cellPadding: 1.0,
-      textColor: [30, 41, 59],
-      lineColor: borderColor,
-      lineWidth: 0.15,
-    },
-    columnStyles: {
-      0: { cellWidth: 96 },
-      1: { cellWidth: 56 },
-      2: { cellWidth: 38, halign: 'right' },
-    },
-    alternateRowStyles: {
-      fillColor: zebraBgColor,
-    },
+    headStyles: { fillColor: headerBgColor, textColor: 255, fontSize: 6.8, fontStyle: 'bold', cellPadding: 1.1 },
+    styles: { fontSize: 6.8, cellPadding: 1.0, textColor: [30, 41, 59], lineColor: borderColor, lineWidth: 0.15 },
+    columnStyles: { 0: { cellWidth: 96 }, 1: { cellWidth: 56 }, 2: { cellWidth: 38, halign: 'right' } },
+    alternateRowStyles: { fillColor: zebraBgColor },
     margin: { left: leftMargin, right: rightMargin },
   });
 
   // @ts-ignore
   currentY = doc.lastAutoTable.finalY + 2;
 
-  // 6. PART E: BANK ACCOUNT DETAILS & VALIDATION STATUS
+  // ============================================================================
+  // PART D: REBATE, SURCHARGE AND CESS
+  // ============================================================================
+  const rebateMethod = comp.regimeOpted === 'new'
+    ? (comp.assessmentYear?.includes('2026-27') ? 'Full Rebate u/s 115BAC (Up to ₹12L / Max ₹60,000)' : 'Full Rebate u/s 115BAC (Up to ₹7L / Max ₹25,000)')
+    : 'Rebate u/s 87A (Up to ₹5L / Max ₹12,500)';
+
+  const partDRows: any[] = [
+    [
+      'Gross Tax Before Rebate',
+      'As per Part C above',
+      formatPdfINR(grossBeforeRebate),
+    ],
+    [
+      'Less: Rebate u/s 87A',
+      rebateMethod,
+      formatPdfINR(comp.rebate87A),
+    ],
+    [
+      { content: 'TAX PAYABLE AFTER REBATE', styles: { fontStyle: 'bold', textColor: [0, 0, 0] } },
+      { content: 'After 87A Rebate & Marginal Relief', styles: { fontStyle: 'bold' } },
+      { content: formatPdfINR(comp.taxAfterRebate), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
+    ],
+  ];
+
+  if (Number(comp.surcharge) > 0) {
+    partDRows.push([
+      'Add: Surcharge',
+      'Applicable Surcharge Rate (with Marginal Relief if any)',
+      formatPdfINR(comp.surcharge),
+    ]);
+  }
+
+  partDRows.push([
+    'Add: Health & Education Cess @ 4%',
+    '4% on (Tax After Rebate + Surcharge)',
+    formatPdfINR(comp.healthAndEducationCess),
+  ]);
+
+  if (Number(comp.relief89) > 0) {
+    partDRows.push([
+      'Less: Relief u/s 89(1)',
+      'Salary Arrears Relief',
+      `(-) ${formatPdfINR(comp.relief89)}`,
+    ]);
+  }
+
+  partDRows.push([
+    { content: 'TOTAL TAX LIABILITY (TAX + SURCHARGE + CESS)', styles: { fontStyle: 'bold', textColor: [0, 0, 0], fillColor: [240, 245, 255] } },
+    { content: 'Net Income Tax Liability', styles: { fontStyle: 'bold', fillColor: [240, 245, 255] } },
+    { content: formatPdfINR(comp.grossTaxLiability), styles: { fontStyle: 'bold', halign: 'right', textColor: navyColor, fillColor: [240, 245, 255] } },
+  ]);
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [
+      [
+        { content: 'PART D: REBATE, SURCHARGE AND HEALTH & EDUCATION CESS', colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+      ],
+      [
+        'Tax Computation Step',
+        'Provision / Basis',
+        { content: 'Amount (₹)', styles: { halign: 'right' } },
+      ],
+    ],
+    body: partDRows,
+    theme: 'grid',
+    headStyles: { fillColor: headerBgColor, textColor: 255, fontSize: 6.8, fontStyle: 'bold', cellPadding: 1.1 },
+    styles: { fontSize: 6.8, cellPadding: 1.0, textColor: [30, 41, 59], lineColor: borderColor, lineWidth: 0.15 },
+    columnStyles: { 0: { cellWidth: 96 }, 1: { cellWidth: 56 }, 2: { cellWidth: 38, halign: 'right' } },
+    alternateRowStyles: { fillColor: zebraBgColor },
+    margin: { left: leftMargin, right: rightMargin },
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 2;
+
+  // ============================================================================
+  // PART E: INTEREST & LATE FILING FEE (SEC 234A / 234B / 234C / 234F)
+  // ============================================================================
+  const settlementResult = computeTaxPaymentSettlement(comp, challanList);
+  const fee234FDetails = comp.lateFilingFeeDetails || settlementResult.lateFilingFeeDetails;
+  const settlement = comp.finalSettlement || settlementResult.finalSettlement;
+
+  const partERows: any[] = [
+    ['Interest u/s 234A (Default in furnishing return)', '1% per month on unpaid tax after due date', formatPdfINR(comp.interest234A || 0)],
+    ['Interest u/s 234B (Default in payment of Advance Tax)', '1% per month from April 1 of AY', formatPdfINR(comp.interest234B || 0)],
+    ['Interest u/s 234C (Deferment of Advance Tax instalments)', 'Quarterly shortfall interest', formatPdfINR(comp.interest234C || 0)],
+    [
+      { content: 'Late Filing Fee u/s 234F (Tracked Separately — Non-Creditable)', styles: { fontStyle: 'bold', textColor: [180, 83, 9] } },
+      `AY ${fee234FDetails.assessmentYear} | Filing u/s ${fee234FDetails.filingSection.split(' - ')[0]}`,
+      { content: formatPdfINR(fee234FDetails.applicableFee), styles: { fontStyle: 'bold', halign: 'right', textColor: [180, 83, 9] } },
+    ],
+  ];
+
+  if (Number(comp.otherLiabilities || 0) > 0) {
+    partERows.push(['Other Applicable Interest / Demand u/s 156', 'Regular Assessment / Other Liabilities', formatPdfINR(comp.otherLiabilities)]);
+  }
+
+  partERows.push([
+    { content: 'TOTAL TAX, INTEREST & LATE FILING FEE LIABILITY', styles: { fontStyle: 'bold', fillColor: [240, 245, 255], textColor: [0, 0, 0] } },
+    { content: 'Gross Liability + 234A/B/C + 234F Fee', styles: { fontStyle: 'bold', fillColor: [240, 245, 255] } },
+    { content: formatPdfINR(settlement.totalGrossDemand), styles: { fontStyle: 'bold', halign: 'right', fillColor: [240, 245, 255], textColor: navyColor } },
+  ]);
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [
+      [
+        { content: 'PART E: INTEREST & LATE FILING FEE (SEC 234A / 234B / 234C / 234F)', colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+      ],
+      [
+        'Interest / Fee Head',
+        'Statutory Basis',
+        { content: 'Amount (₹)', styles: { halign: 'right' } },
+      ],
+    ],
+    body: partERows,
+    theme: 'grid',
+    headStyles: { fillColor: headerBgColor, textColor: 255, fontSize: 6.8, fontStyle: 'bold', cellPadding: 1.1 },
+    styles: { fontSize: 6.8, cellPadding: 1.0, textColor: [30, 41, 59], lineColor: borderColor, lineWidth: 0.15 },
+    columnStyles: { 0: { cellWidth: 96 }, 1: { cellWidth: 56 }, 2: { cellWidth: 38, halign: 'right' } },
+    alternateRowStyles: { fillColor: zebraBgColor },
+    margin: { left: leftMargin, right: rightMargin },
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 1.5;
+
+  // Dedicated Section 234F Compliance & Challan Linkage Sub-table
+  const sec234FRows: any[] = [
+    [
+      { content: 'Assessment Year:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      fee234FDetails.assessmentYear,
+      { content: 'Original Due Date:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      fee234FDetails.originalDueDate || 'Not Found',
+    ],
+    [
+      { content: 'Actual Filing Date:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      normalizeNotFound(fee234FDetails.actualFilingDate),
+      { content: 'Filing Section:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      fee234FDetails.filingSection,
+    ],
+    [
+      { content: 'Taxable Income:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      formatPdfINR(fee234FDetails.taxableIncome, true),
+      { content: 'Applicable Fee u/s 234F:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      { content: formatPdfINR(fee234FDetails.applicableFee, true), styles: { fontStyle: 'bold', textColor: fee234FDetails.applicableFee > 0 ? [180, 83, 9] : [22, 101, 52] } },
+    ],
+    [
+      { content: 'Amount Actually Paid:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      { content: formatPdfINR(fee234FDetails.amountActuallyPaid, true), styles: { fontStyle: 'bold' } },
+      { content: '234F Verification Status:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      fee234FDetails.paymentVerificationStatus,
+    ],
+    [
+      { content: '234F Challan BSR / Serial:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      `BSR: ${normalizeNotFound(fee234FDetails.linkedChallanBsrCode)} | Serial: ${normalizeNotFound(fee234FDetails.linkedChallanSerialNumber)}`,
+      { content: '234F Challan Date:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      normalizeNotFound(fee234FDetails.linkedChallanDate),
+    ],
+    [
+      { content: 'Rule Note:', styles: { fontStyle: 'bold', textColor: navyColor } },
+      { content: `${fee234FDetails.ruleExplanation} (Note: Fee paid u/s 234F is kept separate and NOT treated as refundable tax credit.)`, colSpan: 3, styles: { fontSize: 6.4, textColor: [71, 85, 105] } },
+    ],
+  ];
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [[{ content: 'SECTION 234F LATE FILING FEE AUDIT & CHALLAN LINKAGE', colSpan: 4, styles: { fillColor: [255, 251, 235], textColor: [146, 64, 14], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.1, halign: 'left' } }]],
+    body: sec234FRows,
+    theme: 'grid',
+    styles: { fontSize: 6.6, cellPadding: 0.9, textColor: [30, 41, 59], lineColor: borderColor, lineWidth: 0.15 },
+    columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 55 }, 2: { cellWidth: 40 }, 3: { cellWidth: 55 } },
+    margin: { left: leftMargin, right: rightMargin },
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 2;
+
+  // ============================================================================
+  // PART F: COMPLETE CHALLAN DETAILS
+  // ============================================================================
+  const challanRows: any[] = [];
+  if (challanList.length > 0) {
+    challanList.forEach((ch, idx) => {
+      challanRecordsPrinted++;
+      const bsr = normalizeNotFound(ch.bsrCode);
+      const serial = normalizeNotFound(ch.challanSerialNumber);
+      const dt = normalizeNotFound(ch.challanTenderDate);
+      const cin = normalizeNotFound(ch.cin);
+      const bank = normalizeNotFound(ch.bankName);
+
+      challanRows.push([
+        String(idx + 1),
+        `${ch.challanType}\n[${ch.challanForm || 'ITNS 280'}]`,
+        `BSR: ${bsr}\nS.No: ${serial}\nDt: ${dt}`,
+        `Bank: ${bank}\nCIN: ${cin}`,
+        `Tax: ${formatPdfINR(ch.taxAmount)}\nSC: ${formatPdfINR(ch.surcharge)}\nCess: ${formatPdfINR(ch.cess)}`,
+        `Int: ${formatPdfINR(ch.interest)}\n234F: ${formatPdfINR(ch.lateFilingFee)}\nOth: ${formatPdfINR(ch.otherAmount)}`,
+        { content: formatPdfINR(ch.totalAmountPaid), styles: { fontStyle: 'bold', halign: 'right', textColor: [0, 0, 0] } },
+        `${normalizeNotFound(ch.paymentMode)}\n${ch.challanStatus}\n[${ch.verificationStatus}]`,
+      ]);
+    });
+
+    const sumTax = challanList.reduce((s, c) => s + Number(c.taxAmount || 0), 0);
+    const sumIntFee = challanList.reduce((s, c) => s + Number(c.interest || 0) + Number(c.lateFilingFee || 0) + Number(c.otherAmount || 0), 0);
+    const sumTotal = challanList.reduce((s, c) => s + Number(c.totalAmountPaid || 0), 0);
+
+    challanRows.push([
+      { content: `TOTAL CHALLANS (${challanList.length})`, colSpan: 4, styles: { fontStyle: 'bold', fillColor: [240, 245, 255], textColor: navyColor } },
+      { content: `Tax: ${formatPdfINR(sumTax)}`, styles: { fontStyle: 'bold', fillColor: [240, 245, 255] } },
+      { content: `Int/Fee: ${formatPdfINR(sumIntFee)}`, styles: { fontStyle: 'bold', fillColor: [240, 245, 255] } },
+      { content: formatPdfINR(sumTotal), styles: { fontStyle: 'bold', halign: 'right', fillColor: [240, 245, 255], textColor: navyColor } },
+      { content: 'AY ' + (comp.assessmentYear || '2026-27'), styles: { fontStyle: 'bold', fillColor: [240, 245, 255] } },
+    ]);
+  } else {
+    challanRows.push([
+      {
+        content: 'No individual ITNS 280/281/282/283 or 26AS challan entries recorded for this PAN & Assessment Year. Any summary TDS/Advance Tax credits appear in Part G below.',
+        colSpan: 8,
+        styles: { textColor: [100, 116, 139], fontStyle: 'italic', halign: 'center' },
+      },
+    ]);
+  }
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [
+      [
+        { content: `PART F: COMPLETE CHALLAN DETAILS (${challanList.length} RECORD${challanList.length === 1 ? '' : 'S'})`, colSpan: 8, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+      ],
+      [
+        '#',
+        'Payment Category & Form',
+        'BSR / Serial / Tender Date',
+        'Bank & CIN',
+        'Tax / SC / Cess (₹)',
+        'Int / 234F / Oth (₹)',
+        { content: 'Total Paid (₹)', styles: { halign: 'right' } },
+        'Mode & Verification',
+      ],
+    ],
+    body: challanRows,
+    theme: 'grid',
+    headStyles: { fillColor: headerBgColor, textColor: 255, fontSize: 6.4, fontStyle: 'bold', cellPadding: 1.0 },
+    styles: { fontSize: 6.2, cellPadding: 0.9, textColor: [30, 41, 59], lineColor: borderColor, lineWidth: 0.15, overflow: 'linebreak' },
+    columnStyles: {
+      0: { cellWidth: 7 },
+      1: { cellWidth: 32 },
+      2: { cellWidth: 30 },
+      3: { cellWidth: 32 },
+      4: { cellWidth: 23 },
+      5: { cellWidth: 22 },
+      6: { cellWidth: 20, halign: 'right' },
+      7: { cellWidth: 24 },
+    },
+    alternateRowStyles: { fillColor: zebraBgColor },
+    margin: { left: leftMargin, right: rightMargin },
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 2;
+
+  // ============================================================================
+  // PART G: TDS / TCS / ADVANCE TAX / SELF ASSESSMENT TAX SUMMARY
+  // ============================================================================
+  const syncPaid = settlementResult.synchronizedTaxesPaid;
+  const partGRows: any[] = [];
+
+  const totSalTds = Number(syncPaid.tdsSalary || 0) || salaryEntries.reduce((s, e) => s + (Number(e.tdsSalary) || 0), 0);
+  partGRows.push([
+    '1. TDS on Salary u/s 192 (Form 16 / 26AS)',
+    'Eligible Tax Credit',
+    formatPdfINR(totSalTds),
+  ]);
+  if (salaryEntries.length > 1) {
+    salaryEntries.forEach((e, i) => {
+      if (Number(e.tdsSalary) > 0) {
+        partGRows.push([
+          { content: `   • Employer ${i + 1}: ${e.employerName || 'Employer'}${e.employerTAN ? ` (TAN: ${e.employerTAN})` : ''}`, styles: { textColor: [71, 85, 105], fontSize: 6.3 } },
+          'Employer-wise TDS Credit',
+          formatPdfINR(e.tdsSalary),
+        ]);
+      }
+    });
+  }
+
+  partGRows.push([
+    '2. TDS Other than Salary (u/s 194A / 194C / 194J / 194Q etc.)',
+    'Eligible Tax Credit',
+    formatPdfINR(syncPaid.tdsOther || 0),
+  ]);
+  partGRows.push([
+    '3. Tax Collected at Source (TCS u/s 206C)',
+    'Eligible Tax Credit',
+    formatPdfINR(syncPaid.tcs || 0),
+  ]);
+  partGRows.push([
+    '4. Advance Tax Paid (u/s 208–211)',
+    'Eligible Tax Credit',
+    formatPdfINR(syncPaid.advanceTax || 0),
+  ]);
+  partGRows.push([
+    '5. Self Assessment Tax Paid (u/s 140A)',
+    'Eligible Tax Credit',
+    formatPdfINR(syncPaid.selfAssessmentTax || 0),
+  ]);
+
+  if (Number(syncPaid.regularAssessmentTax || 0) > 0) {
+    partGRows.push([
+      '6. Regular Assessment Tax u/s 156 / Tax on Regular Assessment',
+      'Eligible Tax Credit',
+      formatPdfINR(syncPaid.regularAssessmentTax),
+    ]);
+  }
+  if (Number(syncPaid.otherEligibleCredits || 0) > 0) {
+    partGRows.push([
+      '7. Other Applicable Tax Payments / Credits',
+      'Eligible Tax Credit',
+      formatPdfINR(syncPaid.otherEligibleCredits),
+    ]);
+  }
+
+  partGRows.push([
+    { content: 'TOTAL ELIGIBLE TAX CREDITS (TDS + TCS + ADV TAX + SAT + REG TAX)', styles: { fontStyle: 'bold', fillColor: [240, 245, 255], textColor: navyColor } },
+    { content: 'Creditable Against Tax Liability', styles: { fontStyle: 'bold', fillColor: [240, 245, 255] } },
+    { content: formatPdfINR(settlement.totalEligibleTaxCredits), styles: { fontStyle: 'bold', halign: 'right', fillColor: [240, 245, 255], textColor: navyColor } },
+  ]);
+
+  partGRows.push([
+    { content: 'Separate Non-Creditable Deposits: Late Filing Fee Paid u/s 234F', styles: { textColor: [146, 64, 14] } },
+    'Adjusted strictly against 234F fee (never refundable credit)',
+    formatPdfINR(settlement.totalLateFilingFeePaid),
+  ]);
+  partGRows.push([
+    { content: 'Separate Interest Deposits: Interest Paid (u/s 234A / 234B / 234C)', styles: { textColor: [71, 85, 105] } },
+    'Adjusted against statutory interest',
+    formatPdfINR(settlement.totalInterestPaid),
+  ]);
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [
+      [
+        { content: 'PART G: TDS / TCS / ADVANCE TAX / SELF ASSESSMENT TAX SUMMARY', colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+      ],
+      [
+        'Tax Payment Category',
+        'Classification',
+        { content: 'Amount (₹)', styles: { halign: 'right' } },
+      ],
+    ],
+    body: partGRows,
+    theme: 'grid',
+    headStyles: { fillColor: headerBgColor, textColor: 255, fontSize: 6.8, fontStyle: 'bold', cellPadding: 1.1 },
+    styles: { fontSize: 6.8, cellPadding: 1.0, textColor: [30, 41, 59], lineColor: borderColor, lineWidth: 0.15 },
+    columnStyles: { 0: { cellWidth: 96 }, 1: { cellWidth: 56 }, 2: { cellWidth: 38, halign: 'right' } },
+    alternateRowStyles: { fillColor: zebraBgColor },
+    margin: { left: leftMargin, right: rightMargin },
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 2;
+
+  // ============================================================================
+  // PART H: FINAL TAX PAYABLE OR REFUND CALCULATION
+  // ============================================================================
+  const partHRows: any[] = [];
+  (settlement.breakdownSteps || []).forEach((step) => {
+    const isTotal = step.label.toLowerCase().includes('total') || step.label.toLowerCase().includes('net') || step.label.toLowerCase().includes('settlement');
+    partHRows.push([
+      step.label,
+      step.formula || step.section || '-',
+      {
+        content: formatPdfINR(step.amount),
+        styles: {
+          halign: 'right',
+          fontStyle: isTotal ? 'bold' : 'normal',
+          textColor: [30, 41, 59],
+        },
+      },
+    ]);
+  });
+
+  if (settlement.nonCreditableExcessFeePaid > 0) {
+    partHRows.push([
+      { content: 'Note: Excess Section 234F Fee Paid (Non-Creditable)', styles: { textColor: [146, 64, 14], fontStyle: 'italic' } },
+      'Excluded from refundable tax credit per statutory rules',
+      { content: formatPdfINR(settlement.nonCreditableExcessFeePaid), styles: { halign: 'right', textColor: [146, 64, 14] } },
+    ]);
+  }
+
+  if (settlement.verificationIssues && settlement.verificationIssues.length > 0) {
+    partHRows.push([
+      { content: `Verification Notice: ${settlement.verificationIssues.join(' | ')}`, colSpan: 3, styles: { textColor: [180, 83, 9], fontSize: 6.4, fillColor: [255, 251, 235] } },
+    ]);
+  }
+
+  const outcomeFill: [number, number, number] =
+    settlement.settlementStatus === 'REFUND DUE'
+      ? [236, 253, 245]
+      : settlement.settlementStatus === 'ADDITIONAL TAX PAYABLE'
+        ? [254, 242, 242]
+        : settlement.settlementStatus === 'PAYMENT VERIFICATION REQUIRED'
+          ? [255, 251, 235]
+          : [230, 240, 250];
+  const outcomeColor: [number, number, number] =
+    settlement.settlementStatus === 'REFUND DUE'
+      ? [22, 101, 52]
+      : settlement.settlementStatus === 'ADDITIONAL TAX PAYABLE'
+        ? [185, 28, 28]
+        : settlement.settlementStatus === 'PAYMENT VERIFICATION REQUIRED'
+          ? [180, 83, 9]
+          : navyColor;
+
+  const finalAmountDisplay =
+    settlement.totalRefundDue > 0 ? settlement.totalRefundDue : settlement.additionalAmountPayable;
+
+  partHRows.push([
+    {
+      content: `FINAL SETTLEMENT STATUS: ${settlement.settlementStatus}`,
+      styles: { fontStyle: 'bold', fillColor: outcomeFill, textColor: outcomeColor, fontSize: 7.4 },
+    },
+    {
+      content: settlement.totalRefundDue > 0 ? 'Refundable (Rounded u/s 288B)' : settlement.additionalAmountPayable > 0 ? 'Balance Payable (Rounded u/s 288B)' : 'Settled (NIL)',
+      styles: { fontStyle: 'bold', fillColor: outcomeFill, textColor: outcomeColor },
+    },
+    {
+      content: formatPdfINR(finalAmountDisplay, true),
+      styles: { fontStyle: 'bold', halign: 'right', fillColor: outcomeFill, textColor: outcomeColor, fontSize: 7.6 },
+    },
+  ]);
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [
+      [
+        { content: 'PART H: FINAL TAX PAYABLE OR REFUND CALCULATION & SETTLEMENT SUMMARY', colSpan: 3, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+      ],
+      [
+        'Settlement Step',
+        'Remarks / Statutory Rule',
+        { content: 'Amount (₹)', styles: { halign: 'right' } },
+      ],
+    ],
+    body: partHRows,
+    theme: 'grid',
+    headStyles: { fillColor: headerBgColor, textColor: 255, fontSize: 6.8, fontStyle: 'bold', cellPadding: 1.1 },
+    styles: { fontSize: 6.8, cellPadding: 1.0, textColor: [30, 41, 59], lineColor: borderColor, lineWidth: 0.15 },
+    columnStyles: { 0: { cellWidth: 86 }, 1: { cellWidth: 66 }, 2: { cellWidth: 38, halign: 'right' } },
+    alternateRowStyles: { fillColor: zebraBgColor },
+    margin: { left: leftMargin, right: rightMargin },
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 2;
+
+  // ============================================================================
+  // PART I: BANK ACCOUNT AND REFUND DETAILS
+  // ============================================================================
   const bankRows: any[] = [];
   if (comp.client.bankAccounts && comp.client.bankAccounts.length > 0) {
     comp.client.bankAccounts.forEach((bAcc) => {
@@ -1381,7 +1692,7 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
     startY: currentY,
     head: [
       [
-        { content: 'PART E: BANK ACCOUNT DETAILS & VALIDATION STATUS', colSpan: 4, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
+        { content: 'PART I: BANK ACCOUNT AND REFUND DETAILS', colSpan: 4, styles: { fillColor: [240, 245, 255], textColor: navyColor, fontStyle: 'bold', fontSize: 7.5, cellPadding: 1.2, halign: 'left' } },
       ],
       [
         'Bank Name',
@@ -1725,6 +2036,9 @@ export function buildComputationPdfDoc(comp: TaxComputation, firm: FirmDetails):
   if (otherSourceRecordsFound > 0 && otherSourceRecordsPrinted < otherSourceRecordsFound) {
     throw new Error(`Data Completeness Check Failed: Found ${otherSourceRecordsFound} other source income records in source data but rendered ${otherSourceRecordsPrinted}. PDF generation halted.`);
   }
+  if (challanRecordsFound > 0 && challanRecordsPrinted < challanRecordsFound) {
+    throw new Error(`Data Completeness Check Failed: Found ${challanRecordsFound} challan records in source data but rendered ${challanRecordsPrinted}. PDF generation halted.`);
+  }
 
   // Dynamic Running Header & Footer & Page Numbering across ALL pages
   const totalPages = typeof (doc as any).getNumberOfPages === 'function' 
@@ -1829,11 +2143,116 @@ export function printComputationPdf(comp: TaxComputation, firm: FirmDetails): vo
     };
   } catch (err: any) {
     console.error('PDF print generation error, falling back to window.print():', err);
-    alert(`PDF Print Failed: ${err?.message || 'An error occurred during print PDF generation.'}`);
     try {
       window.print();
     } catch (e) {
       console.error('window.print() error:', e);
     }
   }
+}
+
+export function exportChallanRegisterToPdf(
+  challans: TaxChallanRecord[],
+  firm: FirmDetails,
+  filterNote: string = 'All Records'
+): void {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const navyColor: [number, number, number] = [16, 54, 107];
+  let y = 12;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(navyColor[0], navyColor[1], navyColor[2]);
+  doc.text('CHALLAN REGISTER & TAX PAYMENT STATEMENT', pageWidth / 2, y, { align: 'center' });
+
+  y += 4.5;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `${firm?.firmName || 'ITR PRO INDIA'} | Filter: ${filterNote} | Total Challans: ${challans.length} | Generated: ${new Date().toLocaleDateString('en-IN')}`,
+    pageWidth / 2,
+    y,
+    { align: 'center' }
+  );
+
+  y += 4;
+  const bodyRows = challans.map((ch, idx) => [
+    String(idx + 1),
+    `${normalizeNotFound(ch.pan)}\n${normalizeNotFound(ch.assesseeName)}`,
+    `AY ${ch.assessmentYear}\nFY ${ch.financialYear}`,
+    `${ch.challanType}\n(${ch.challanForm || 'ITNS 280'})`,
+    `BSR: ${normalizeNotFound(ch.bsrCode)}\nS.No: ${normalizeNotFound(ch.challanSerialNumber)}\nDate: ${normalizeNotFound(ch.challanTenderDate)}`,
+    `Bank: ${normalizeNotFound(ch.bankName)}\nCIN: ${normalizeNotFound(ch.cin)}`,
+    formatPdfINR(ch.taxAmount),
+    formatPdfINR((ch.surcharge || 0) + (ch.cess || 0)),
+    formatPdfINR(ch.interest),
+    formatPdfINR(ch.lateFilingFee),
+    formatPdfINR(ch.otherAmount),
+    formatPdfINR(ch.totalAmountPaid),
+    `${normalizeNotFound(ch.paymentMode)}\n${ch.verificationStatus}`,
+  ]);
+
+  const totalPaidSum = challans.reduce((s, c) => s + Number(c.totalAmountPaid || 0), 0);
+  const total234FSum = challans.reduce((s, c) => s + Number(c.lateFilingFee || 0), 0);
+  const totalTaxSum = challans.reduce((s, c) => s + Number(c.taxAmount || 0), 0);
+
+  bodyRows.push([
+    { content: `GRAND TOTAL (${challans.length} CHALLANS)`, colSpan: 6, styles: { fontStyle: 'bold', fillColor: [240, 245, 255], textColor: navyColor } } as any,
+    { content: formatPdfINR(totalTaxSum), styles: { fontStyle: 'bold', halign: 'right', fillColor: [240, 245, 255] } } as any,
+    { content: '-', styles: { halign: 'right', fillColor: [240, 245, 255] } } as any,
+    { content: '-', styles: { halign: 'right', fillColor: [240, 245, 255] } } as any,
+    { content: formatPdfINR(total234FSum), styles: { fontStyle: 'bold', halign: 'right', fillColor: [240, 245, 255] } } as any,
+    { content: '-', styles: { halign: 'right', fillColor: [240, 245, 255] } } as any,
+    { content: formatPdfINR(totalPaidSum), styles: { fontStyle: 'bold', halign: 'right', fillColor: [240, 245, 255], textColor: navyColor } } as any,
+    { content: 'Verified Register', styles: { fontStyle: 'bold', fillColor: [240, 245, 255] } } as any,
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    head: [[
+      '#',
+      'PAN & Assessee',
+      'AY / FY',
+      'Payment Category',
+      'BSR / Serial / Date',
+      'Bank & CIN',
+      { content: 'Tax', styles: { halign: 'right' } },
+      { content: 'SC+Cess', styles: { halign: 'right' } },
+      { content: 'Interest', styles: { halign: 'right' } },
+      { content: '234F Fee', styles: { halign: 'right' } },
+      { content: 'Other', styles: { halign: 'right' } },
+      { content: 'Total (₹)', styles: { halign: 'right' } },
+      'Mode & Status',
+    ]],
+    body: bodyRows,
+    theme: 'grid',
+    headStyles: { fillColor: navyColor, textColor: 255, fontSize: 6.5, fontStyle: 'bold', cellPadding: 1.1 },
+    styles: { fontSize: 6.2, cellPadding: 1.0, textColor: [30, 41, 59], lineColor: [203, 213, 225], lineWidth: 0.15 },
+    columnStyles: {
+      0: { cellWidth: 7 },
+      1: { cellWidth: 32 },
+      2: { cellWidth: 18 },
+      3: { cellWidth: 34 },
+      4: { cellWidth: 30 },
+      5: { cellWidth: 32 },
+      6: { cellWidth: 16, halign: 'right' },
+      7: { cellWidth: 16, halign: 'right' },
+      8: { cellWidth: 15, halign: 'right' },
+      9: { cellWidth: 16, halign: 'right' },
+      10: { cellWidth: 14, halign: 'right' },
+      11: { cellWidth: 21, halign: 'right' },
+      12: { cellWidth: 26 },
+    },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    margin: { left: 10, right: 10 },
+  });
+
+  doc.save(`Challan_Register_${new Date().toISOString().split('T')[0]}.pdf`);
 }

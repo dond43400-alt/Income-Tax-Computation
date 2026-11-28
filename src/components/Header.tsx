@@ -11,15 +11,16 @@ import {
   CheckCircle2,
   Sparkles,
   Globe,
-  Camera
+  Camera,
+  Receipt
 } from 'lucide-react';
 import { Language, FirmDetails, TaxComputation } from '../types';
 import { TRANSLATIONS } from '../utils/translations';
 import { formatINR } from '../utils/pdfGenerator';
 
 interface HeaderProps {
-  currentTab: 'upload' | 'sheet' | 'clients';
-  setCurrentTab: (tab: 'upload' | 'sheet' | 'clients') => void;
+  currentTab: 'upload' | 'sheet' | 'clients' | 'challans';
+  setCurrentTab: (tab: 'upload' | 'sheet' | 'clients' | 'challans') => void;
   lang: Language;
   setLang: (lang: Language) => void;
   firm: FirmDetails;
@@ -28,6 +29,7 @@ interface HeaderProps {
   onOpenPortalSyncModal?: () => void;
   onOpenManualClientModal?: () => void;
   computations: TaxComputation[];
+  totalChallansCount?: number;
   onExportAllExcel: () => void;
 }
 
@@ -42,6 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPortalSyncModal,
   onOpenManualClientModal,
   computations,
+  totalChallansCount = 0,
   onExportAllExcel,
 }) => {
   const t = TRANSLATIONS[lang];
@@ -216,7 +219,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => setCurrentTab('clients')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg font-medium transition ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg font-medium transition whitespace-nowrap ${
               currentTab === 'clients'
                 ? 'bg-blue-600 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -224,8 +227,23 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>{t.clientDirectory}</span>
-            <span className="bg-slate-800 text-slate-300 text-xs px-1.5 py-0.5 rounded-full">
+            <span className="bg-slate-800 text-slate-300 text-xs px-1.5 py-0.5 rounded-full tabular-nums">
               {computations.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setCurrentTab('challans')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg font-medium transition whitespace-nowrap ${
+              currentTab === 'challans'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            <span>Challan Register</span>
+            <span className="bg-slate-800 text-slate-300 text-xs px-1.5 py-0.5 rounded-full tabular-nums">
+              {totalChallansCount}
             </span>
           </button>
         </div>

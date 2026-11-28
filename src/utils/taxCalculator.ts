@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { checkITREligibility } from './itrEligibilityEngine';
 import { calculateAllBusinesses, calculateCapitalAccount } from './businessCalculationEngine';
+import { computeTaxPaymentSettlement } from './challanEngine';
 
 // ============================================================================
 // 1. STATUTORY ROUNDING (SECTION 288A & SECTION 288B)
@@ -1758,6 +1759,23 @@ export function recalculateFullComputation(comp: TaxComputation): TaxComputation
   // Run central ITR eligibility audit engine
   const eligibilityResult = checkITREligibility(resultComputation);
   resultComputation.eligibilityResult = eligibilityResult;
+
+  // Run Tax Payment, Challan, Section 234F & Final Settlement Engine
+  const settlementResult = computeTaxPaymentSettlement(resultComputation);
+  resultComputation.lateFilingFeeDetails = settlementResult.lateFilingFeeDetails;
+  resultComputation.fee234F = settlementResult.lateFilingFeeDetails.applicableFee;
+  resultComputation.totalTaxAndInterest = roundToNearestTen(
+    Math.max(0, taxBreakdown.totalTaxPayable - relief89) +
+    int234A +
+    int234B +
+    int234C +
+    resultComputation.fee234F +
+    Math.max(0, comp.otherLiabilities || 0)
+  );
+  resultComputation.taxesPaid = settlementResult.synchronizedTaxesPaid;
+  resultComputation.finalSettlement = settlementResult.finalSettlement;
+  resultComputation.netTaxPayable = settlementResult.finalSettlement.additionalAmountPayable;
+  resultComputation.refundDue = settlementResult.finalSettlement.totalRefundDue;
 
   return resultComputation;
 }

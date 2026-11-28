@@ -1,9 +1,10 @@
-import { TaxComputation, FirmDetails, Language } from '../types';
+import { TaxComputation, FirmDetails, Language, TaxChallanRecord } from '../types';
 import { DEFAULT_FIRM_DETAILS, SAMPLE_COMPUTATIONS } from './sampleData';
 
 const COMPUTATIONS_KEY = 'itr_tax_computations_v1';
 const FIRM_DETAILS_KEY = 'itr_firm_details_v1';
 const LANGUAGE_KEY = 'itr_language_v1';
+const STANDALONE_CHALLANS_KEY = 'itr_standalone_challans_v1';
 
 export function loadSavedComputations(): TaxComputation[] {
   try {
@@ -25,6 +26,29 @@ export function saveComputations(computations: TaxComputation[]): void {
     localStorage.setItem(COMPUTATIONS_KEY, JSON.stringify(computations));
   } catch (e) {
     console.error('Error saving computations to localStorage', e);
+  }
+}
+
+export function loadStandaloneChallans(): TaxChallanRecord[] {
+  try {
+    const raw = localStorage.getItem(STANDALONE_CHALLANS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Error loading standalone challans from localStorage', e);
+  }
+  return [];
+}
+
+export function saveStandaloneChallans(challans: TaxChallanRecord[]): void {
+  try {
+    localStorage.setItem(STANDALONE_CHALLANS_KEY, JSON.stringify(challans));
+  } catch (e) {
+    console.error('Error saving standalone challans to localStorage', e);
   }
 }
 

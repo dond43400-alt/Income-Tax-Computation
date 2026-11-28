@@ -27,6 +27,7 @@ import { exportSingleComputationToExcel } from '../utils/excelExporter';
 import { recalculateFullComputation } from '../utils/taxCalculator';
 import { BalanceSheetSection } from './BalanceSheetSection';
 import { ITREligibilityBanner } from './ITREligibilityBanner';
+import { TaxPaymentsChallanSection } from './TaxPaymentsChallanSection';
 
 interface ComputationSheetProps {
   computation: TaxComputation;
@@ -88,6 +89,8 @@ export const ComputationSheet: React.FC<ComputationSheetProps> = ({
 
   // Copy Short Summary text
   const handleCopySummary = () => {
+    const challanCount = computation.taxesPaid?.challans?.length || 0;
+    const settlementOutcome = computation.finalSettlement?.settlementStatus || (computation.refundDue > 0 ? 'REFUND DUE' : computation.netTaxPayable > 0 ? 'ADDITIONAL TAX PAYABLE' : 'NO TAX PAYABLE / NO REFUND');
     const summaryText = `*INCOME TAX COMPUTATION STATEMENT (A.Y. ${computation.assessmentYear})*
 ---------------------------------------
 👤 *Client:* ${computation.client.name}
@@ -98,7 +101,9 @@ export const ComputationSheet: React.FC<ComputationSheetProps> = ({
 💰 *Gross Total Income (GTI):* ${formatINR(computation.grossTotalIncome)}
 🎯 *Total Taxable Income:* ${formatINR(computation.totalTaxableIncome)}
 📊 *Total Tax Liability:* ${formatINR(computation.grossTaxLiability)}
-💳 *Taxes Paid (TDS/Adv):* ${formatINR(computation.taxesPaid.totalTaxesPaid)}
+⚖️ *Interest (234A/B/C) & Fee (234F):* ${formatINR((computation.interest234A || 0) + (computation.interest234B || 0) + (computation.interest234C || 0))} + Fee ${formatINR(computation.fee234F || 0)}
+💳 *Eligible Tax Credits (${challanCount} Challans):* ${formatINR(computation.finalSettlement?.totalEligibleTaxCredits ?? computation.taxesPaid.totalTaxesPaid)}
+📌 *Settlement Status:* ${settlementOutcome}
 ---------------------------------------
 ${
   computation.refundDue > 0
@@ -1410,11 +1415,34 @@ ${
                   <td className="px-2.5 py-1 text-right font-mono">{Number(computation.grossTaxLiability).toLocaleString('en-IN')}</td>
                 </tr>
 
+                {/* Interest & Late Fee 234F */}
+                {((computation.interest234A || 0) + (computation.interest234B || 0) + (computation.interest234C || 0) + (computation.fee234F || 0)) > 0 && (
+                  <tr className="border-b border-[#cbd5e1] bg-amber-50/60">
+                    <td className="px-2.5 py-1 text-amber-900 border-r border-[#cbd5e1]">
+                      Add: Interest u/s 234A/B/C &amp; Late Filing Fee u/s 234F
+                    </td>
+                    <td className="px-2.5 py-1 text-center text-amber-800 border-r border-[#cbd5e1]">
+                      Int: {formatINR((computation.interest234A || 0) + (computation.interest234B || 0) + (computation.interest234C || 0))} | 234F Fee: {formatINR(computation.fee234F || 0)}
+                    </td>
+                    <td className="px-2.5 py-1 text-right font-mono text-amber-900 font-semibold">
+                      {Number((computation.interest234A || 0) + (computation.interest234B || 0) + (computation.interest234C || 0) + (computation.fee234F || 0)).toLocaleString('en-IN')}
+                    </td>
+                  </tr>
+                )}
+
                 {/* Taxes Paid */}
                 <tr className="border-b border-[#cbd5e1] bg-white">
-                  <td className="px-2.5 py-1 text-slate-800 border-r border-[#cbd5e1]">Taxes Paid (TDS / TCS / Advance Tax)</td>
-                  <td className="px-2.5 py-1 text-center text-slate-500 border-r border-[#cbd5e1]">-</td>
-                  <td className="px-2.5 py-1 text-right font-mono text-slate-900">{Number(computation.taxesPaid.totalTaxesPaid).toLocaleString('en-IN')}</td>
+                  <td className="px-2.5 py-1 text-slate-800 border-r border-[#cbd5e1]">
+                    Eligible Tax Credits (TDS / TCS / Advance Tax / Self Assessment Tax)
+                  </td>
+                  <td className="px-2.5 py-1 text-center text-slate-500 border-r border-[#cbd5e1]">
+                    {(computation.taxesPaid?.challans?.length || 0) > 0
+                      ? `${computation.taxesPaid.challans!.length} Challan(s) Recorded`
+                      : 'Prepaid Credits'}
+                  </td>
+                  <td className="px-2.5 py-1 text-right font-mono text-slate-900">
+                    {Number(computation.finalSettlement?.totalEligibleTaxCredits ?? computation.taxesPaid.totalTaxesPaid).toLocaleString('en-IN')}
+                  </td>
                 </tr>
 
                 {/* Net Amount Payable / Refundable */}
@@ -1422,7 +1450,9 @@ ${
                   <td className="px-2.5 py-1.5 uppercase border-r border-[#cbd5e1] text-[#10366b]">
                     {computation.refundDue > 0 ? 'NET REFUND DUE TO ASSESSEE' : 'NET AMOUNT PAYABLE / (REFUNDABLE)'}
                   </td>
-                  <td className="px-2.5 py-1.5 text-center text-slate-500 border-r border-[#cbd5e1]">-</td>
+                  <td className="px-2.5 py-1.5 text-center text-slate-600 border-r border-[#cbd5e1] text-[9.5px] font-bold">
+                    {computation.finalSettlement?.settlementStatus || (computation.refundDue > 0 ? 'REFUND DUE' : computation.netTaxPayable > 0 ? 'ADDITIONAL TAX PAYABLE' : 'SETTLED')}
+                  </td>
                   <td className="px-2.5 py-1.5 text-right font-mono text-[#10366b] text-[11.5px]">
                     {Number(computation.refundDue > 0 ? computation.refundDue : computation.netTaxPayable).toLocaleString('en-IN')}
                   </td>
@@ -1432,11 +1462,17 @@ ${
           </div>
         </div>
 
-        {/* PART E: BANK ACCOUNT DETAILS & VALIDATION STATUS */}
+        {/* PART E–H: TAX PAYMENTS, CHALLAN DETAILS, SEC 234F & FINAL SETTLEMENT */}
+        <TaxPaymentsChallanSection
+          computation={computation}
+          onUpdateComputation={onUpdateComputation}
+        />
+
+        {/* PART I: BANK ACCOUNT DETAILS & VALIDATION STATUS */}
         <div className="space-y-1">
           <div className="bg-[#f0f4ff] px-2.5 py-1 rounded-t border border-[#cbd5e1] border-b-0 flex items-center justify-between">
             <h2 className="text-[11px] font-bold text-[#10366b] uppercase tracking-wider">
-              PART E: BANK ACCOUNT DETAILS & VALIDATION STATUS
+              PART I: BANK ACCOUNT DETAILS &amp; REFUND VALIDATION STATUS
             </h2>
             <button
               type="button"

@@ -235,6 +235,174 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
     }
   });
 
+  // 4. AI OCR & Structured Extraction for Tax Challans, ITNS 280/281/282/283, Form 26AS, AIS, TIS, ITR Ack
+  app.post("/api/ocr-challan", async (req, res) => {
+    try {
+      const { files, rawText, fileName } = req.body;
+      if ((!files || !Array.isArray(files) || files.length === 0) && (!rawText || typeof rawText !== "string")) {
+        return res.status(400).json({ success: false, error: "No challan document, PDF, image, or text provided for extraction." });
+      }
+
+      let ai: GoogleGenAI;
+      try {
+        ai = getGeminiClient();
+      } catch (keyErr: any) {
+        return res.status(400).json({
+          success: false,
+          error: keyErr.message || "GEMINI_API_KEY is missing.",
+        });
+      }
+
+      const contentParts: any[] = [];
+      if (Array.isArray(files)) {
+        for (const f of files) {
+          let cleanBase64 = f.data || "";
+          let mimeType = f.mimeType || "image/jpeg";
+          if (cleanBase64.includes(";base64,")) {
+            const split = cleanBase64.split(";base64,");
+            mimeType = split[0].replace("data:", "") || mimeType;
+            cleanBase64 = split[1];
+          }
+          cleanBase64 = cleanBase64.replace(/\s/g, "");
+          if (cleanBase64) {
+            contentParts.push({
+              inlineData: {
+                data: cleanBase64,
+                mimeType,
+              },
+            });
+          }
+        }
+      }
+
+      if (rawText && rawText.trim().length > 0) {
+        contentParts.push({
+          text: `Extracted document text (${fileName || "uploaded file"}):\n${rawText.slice(0, 60000)}`,
+        });
+      }
+
+      const extractionPrompt = `You are a senior Indian Chartered Accountant & Income Tax Challan Auditor.
+Extract all tax payment / challan / TDS / TCS entries from the provided document(s), which may be:
+- Income Tax Challan Receipt / e-Pay Tax Receipt
+- Challan ITNS 280 (Income Tax / Advance Tax / Self Assessment Tax / Regular Assessment / 234F / 234A/B/C)
+- Challan ITNS 281 (TDS/TCS)
+- Challan ITNS 282 / ITNS 283
+- Form 26AS (Part A TDS, Part B TCS, Part C Tax Paid)
+- AIS / TIS (Annual Information Statement / Taxpayer Information Summary)
+- ITR Acknowledgement (ITR-V) or Tax Computation Sheet
+
+CRITICAL ACCURACY RULES (ZERO FABRICATION):
+1. Extract ONLY values explicitly present in the document.
+2. If ANY string field (bsrCode, challanSerialNumber, challanTenderDate, bankName, cin, pan, assesseeName, assessmentYear, paymentMode) is missing, cut off, or unreadable, output the EXACT string "Not Found". NEVER guess, invent, or fabricate BSR codes, serial numbers, CINs, or dates.
+3. Map paymentType strictly to one of these exact 11 categories:
+   - "Self Assessment Tax – u/s 140A"
+   - "Advance Tax"
+   - "Regular Assessment Tax – u/s 156"
+   - "Tax on Regular Assessment"
+   - "Late Filing Fee – u/s 234F"
+   - "Interest u/s 234A"
+   - "Interest u/s 234B"
+   - "Interest u/s 234C"
+   - "TDS"
+   - "TCS"
+   - "Other applicable tax payments"
+   (Note: On ITNS 280 / e-Pay Tax: Minor Head 100 = Advance Tax, 300 = Self Assessment Tax – u/s 140A, 400 = Regular Assessment Tax – u/s 156. If Late Filing Fee 234F is the sole/primary payment, use "Late Filing Fee – u/s 234F". If a Self Assessment Tax challan includes tax + interest + 234F fee breakdown, populate taxAmount, surcharge, cess, interest, lateFilingFee, otherAmount accurately!)
+4. Format challanTenderDate as DD/MM/YYYY if legible, else "Not Found".
+5. Format bsrCode as 7 digits if legible, else "Not Found".
+6. Format pan in UPPERCASE (10 chars) if legible, else "Not Found".
+7. Format assessmentYear as YYYY-YY (e.g. 2025-26 or 2026-27) if legible, else "Not Found".`;
+
+      contentParts.push({ text: extractionPrompt });
+
+      const CHALLAN_MODELS = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
+      let lastError: any = null;
+      let rawJsonText = "";
+
+      for (const modelName of CHALLAN_MODELS) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: contentParts,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  detectedDocumentType: {
+                    type: Type.STRING,
+                    description: "e.g. Challan ITNS 280, Income Tax Payment Receipt, Form 26AS, AIS, TIS, ITR Acknowledgement",
+                  },
+                  extractionNotes: {
+                    type: Type.STRING,
+                    description: "Brief note on what was extracted or any unreadable fields",
+                  },
+                  challans: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        pan: { type: Type.STRING },
+                        assesseeName: { type: Type.STRING },
+                        assessmentYear: { type: Type.STRING },
+                        financialYear: { type: Type.STRING },
+                        paymentType: { type: Type.STRING },
+                        challanForm: { type: Type.STRING },
+                        bsrCode: { type: Type.STRING },
+                        challanSerialNumber: { type: Type.STRING },
+                        challanTenderDate: { type: Type.STRING },
+                        bankName: { type: Type.STRING },
+                        cin: { type: Type.STRING },
+                        taxAmount: { type: Type.NUMBER },
+                        surcharge: { type: Type.NUMBER },
+                        cess: { type: Type.NUMBER },
+                        interest: { type: Type.NUMBER },
+                        lateFilingFee: { type: Type.NUMBER },
+                        otherAmount: { type: Type.NUMBER },
+                        totalAmountPaid: { type: Type.NUMBER },
+                        paymentMode: { type: Type.STRING },
+                      },
+                      required: ["paymentType", "bsrCode", "challanSerialNumber", "challanTenderDate", "totalAmountPaid", "cin"],
+                    },
+                  },
+                },
+                required: ["detectedDocumentType", "challans"],
+              },
+            },
+          });
+
+          rawJsonText = response.text || "{}";
+          if (rawJsonText.trim().length > 0) {
+            lastError = null;
+            break;
+          }
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`Challan OCR model ${modelName} failed:`, err.message);
+        }
+      }
+
+      if (!rawJsonText || lastError) {
+        throw new Error(lastError?.message || "Failed to extract challan details via Gemini OCR.");
+      }
+
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(rawJsonText);
+      } catch {
+        const cleaned = rawJsonText.replace(/```json/g, "").replace(/```/g, "").trim();
+        parsed = JSON.parse(cleaned);
+      }
+
+      return res.json({ success: true, data: parsed });
+    } catch (error: any) {
+      console.error("Challan OCR Extraction Error:", error);
+      return res.status(500).json({
+        success: false,
+        error: error.message || "Failed to extract challan details from document.",
+      });
+    }
+  });
+
   // Global JSON Error Handler to ensure API routes always return JSON (never HTML)
   app.use("/api", (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error("API Route Error:", err);
