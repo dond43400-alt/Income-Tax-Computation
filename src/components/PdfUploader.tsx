@@ -27,6 +27,7 @@ import { createEmptyComputation } from '../utils/taxCalculator';
 import { SAMPLE_COMPUTATIONS, SAMPLE_RAW_PDF_TEXT } from '../utils/sampleData';
 import { formatINR } from '../utils/pdfGenerator';
 import { ExtractionReviewModal } from './ExtractionReviewModal';
+import { getReadableErrorMessage } from '../utils/safeFormat';
 
 interface PdfUploaderProps {
   lang: Language;
@@ -93,9 +94,9 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
       
       setLastResult(parsed);
       setIsReviewModalOpen(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('PDF Parse error:', err);
-      setErrorMessage('Error reading PDF: ' + (err?.message || 'Unknown error occurred.'));
+      setErrorMessage('Error reading PDF: ' + getReadableErrorMessage(err, 'Unknown error occurred.'));
     } finally {
       setIsProcessing(false);
       setProgressMessage('');
@@ -134,8 +135,8 @@ export const PdfUploader: React.FC<PdfUploaderProps> = ({
       const parsed = parseTaxDocumentText(pastedText, 'Pasted_ITR_Data.txt', pastedText.length, false);
       setLastResult(parsed);
       setIsReviewModalOpen(true);
-    } catch (e: any) {
-      setErrorMessage('Could not parse text: ' + e.message);
+    } catch (e: unknown) {
+      setErrorMessage('Could not parse text: ' + getReadableErrorMessage(e, 'Unknown error occurred.'));
     } finally {
       setIsProcessing(false);
       setProgressMessage('');

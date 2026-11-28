@@ -7,6 +7,7 @@ import {
   FinalSettlementOutcome,
   ChallanAuditEntry,
 } from '../types';
+import { toSafeString } from './safeFormat';
 
 export const TAX_PAYMENT_CATEGORIES: TaxPaymentCategory[] = [
   'Self Assessment Tax – u/s 140A',
@@ -49,19 +50,27 @@ export function roundToNearestTen(num: number): number {
   return Math.round(num / 10) * 10;
 }
 
-export function normalizeNotFound(val?: string | null): string {
-  if (!val) return 'Not Found';
-  const trimmed = String(val).trim();
-  if (!trimmed || trimmed === '-' || trimmed === '--' || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'null' || trimmed.toLowerCase() === 'undefined') {
+export function normalizeNotFound(val?: unknown): string {
+  if (val === null || val === undefined) return 'Not Found';
+  const trimmed = toSafeString(val).trim();
+  if (
+    !trimmed ||
+    trimmed === '-' ||
+    trimmed === '--' ||
+    trimmed.toLowerCase() === 'n/a' ||
+    trimmed.toLowerCase() === 'null' ||
+    trimmed.toLowerCase() === 'undefined' ||
+    trimmed.toLowerCase() === '[object object]'
+  ) {
     return 'Not Found';
   }
   return trimmed;
 }
 
-export function isMissingField(val?: string | null): boolean {
-  if (!val) return true;
-  const t = String(val).trim().toLowerCase();
-  return t === '' || t === 'not found' || t === 'n/a' || t === '-' || t === '--';
+export function isMissingField(val?: unknown): boolean {
+  if (val === null || val === undefined) return true;
+  const t = toSafeString(val).trim().toLowerCase();
+  return t === '' || t === 'not found' || t === 'n/a' || t === '-' || t === '--' || t === '[object object]';
 }
 
 export function parseFlexibleIndianDate(dateStr?: string): Date | null {
@@ -439,8 +448,8 @@ export function diffChallanChanges(
 
   const diffs: Array<{ field: string; oldValue: string; newValue: string }> = [];
   for (const f of fields) {
-    const ov = String(oldRec[f.key] ?? '');
-    const nv = String(newRec[f.key] ?? '');
+    const ov = toSafeString(oldRec[f.key]);
+    const nv = toSafeString(newRec[f.key]);
     if (ov !== nv) {
       diffs.push({ field: f.label, oldValue: ov, newValue: nv });
     }
@@ -777,11 +786,11 @@ export function extractChallansFromJsonContent(
   const root = parsed.ITR || parsed.ITR1 || parsed.ITR2 || parsed.ITR3 || parsed.ITR4 || parsed;
   const personal = root.PersonalInfo || root.personalInfo || {};
   const pan = normalizeNotFound(personal.PAN || root.PAN || parsed.pan || fallbackPan).toUpperCase();
-  const name = normalizeNotFound(
-    personal.AssesseeName
-      ? `${personal.AssesseeName.FirstName || ''} ${personal.AssesseeName.MiddleName || ''} ${personal.AssesseeName.SurNameOrOrgName || ''}`.trim()
-      : personal.Name || fallbackName
-  ).toUpperCase();
+  const rawAssesseeName =
+    personal.AssesseeName && typeof personal.AssesseeName === 'object'
+      ? `${toSafeString(personal.AssesseeName.FirstName)} ${toSafeString(personal.AssesseeName.MiddleName)} ${toSafeString(personal.AssesseeName.SurNameOrOrgName)}`.trim()
+      : personal.AssesseeName || personal.Name || fallbackName;
+  const name = normalizeNotFound(rawAssesseeName).toUpperCase();
   const ay = normalizeNotFound(root.Form_ITR1?.AssessmentYear || root.Form_ITR4?.AssessmentYear || root.AssessmentYear || parsed.assessmentYear || fallbackAy || '2026-27');
   const fy = isMissingField(ay) ? 'Not Found' : getFinancialYearFromAY(ay);
 
@@ -804,7 +813,7 @@ export function extractChallansFromJsonContent(
       assessmentYear: ay,
       financialYear: fy,
       challanType: partial.challanType || 'Self Assessment Tax – u/s 140A',
-      challanForm: partial.challanForm || 'ITR JSON',
+      challanForm: normalizeNotFound(partial.challanForm) !== 'Not Found' ? normalizeNotFound(partial.challanForm) : 'ITR JSON',
       challanSerialNumber: normalizeNotFound(partial.challanSerialNumber),
       bsrCode: normalizeNotFound(partial.bsrCode),
       challanTenderDate: normalizeNotFound(partial.challanTenderDate),
@@ -840,7 +849,7 @@ export function extractChallansFromJsonContent(
     const amt = Number(tp.Amt || tp.Amount || tp.TotalTaxPaid || 0);
     if (amt <= 0 && !tp.BSRCode && !tp.ChallanNo) return;
     pushRecord({
-      challanType: tp.MinorHead === '300' ? 'Self Assessment Tax – u/s 140A' : tp.MinorHead === '400' ? 'Regular Assessment Tax – u/s 156' : 'Advance Tax',
+      challanType: toSafeString(tp.MinorHead) === '300' ? 'Self Assessment Tax – u/s 140A' : toSafeString(tp.MinorHead) === '400' ? 'Regular Assessment Tax – u/s 156' : 'Advance Tax',
       challanForm: 'ITNS 280',
       bsrCode: tp.BSRCode || tp.bsrCode,
       challanSerialNumber: tp.ChallanNo || tp.SrlNoOfChaln || tp.challanSerialNumber,
@@ -858,10 +867,12 @@ export function extractChallansFromJsonContent(
   const tdsSal = root.TDSonSals?.TDSonSal || [];
   (Array.isArray(tdsSal) ? tdsSal : [tdsSal]).forEach((t: any) => {
     if (!t || !Number(t.TotalTDSSal || t.TDSDeducted || 0)) return;
+    const dedName = toSafeString(t.EmployerOrDeductorOrCollectDetl?.EmployerOrDeductorOrCollecterName);
+    const dedTan = toSafeString(t.EmployerOrDeductorOrCollectDetl?.TAN);
     pushRecord({
       challanType: 'TDS',
       challanForm: 'Form 26AS',
-      bankName: t.EmployerOrDeductorOrCollectDetl?.EmployerOrDeductorOrCollecterName || 'Employer TAN: ' + (t.EmployerOrDeductorOrCollectDetl?.TAN || 'Not Found'),
+      bankName: dedName || (dedTan ? `Employer TAN: ${dedTan}` : 'Not Found'),
       taxAmount: Number(t.TotalTDSSal || t.TDSDeducted || 0),
       totalAmountPaid: Number(t.TotalTDSSal || t.TDSDeducted || 0),
       paymentMode: 'Deducted at Source',
@@ -871,10 +882,12 @@ export function extractChallansFromJsonContent(
   const tdsOth = root.TDSonOthThanSals?.TDSonOthThanSal || [];
   (Array.isArray(tdsOth) ? tdsOth : [tdsOth]).forEach((t: any) => {
     if (!t || !Number(t.TDSAmount || t.ClaimedTDS || 0)) return;
+    const dedName = toSafeString(t.EmployerOrDeductorOrCollectDetl?.EmployerOrDeductorOrCollecterName);
+    const dedTan = toSafeString(t.EmployerOrDeductorOrCollectDetl?.TAN);
     pushRecord({
       challanType: 'TDS',
       challanForm: 'Form 26AS',
-      bankName: t.EmployerOrDeductorOrCollectDetl?.EmployerOrDeductorOrCollecterName || 'Deductor TAN: ' + (t.EmployerOrDeductorOrCollectDetl?.TAN || 'Not Found'),
+      bankName: dedName || (dedTan ? `Deductor TAN: ${dedTan}` : 'Not Found'),
       taxAmount: Number(t.TDSAmount || t.ClaimedTDS || 0),
       totalAmountPaid: Number(t.TDSAmount || t.ClaimedTDS || 0),
       paymentMode: 'Deducted at Source',

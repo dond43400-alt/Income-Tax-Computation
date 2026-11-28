@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { TaxComputation, ClientDetails } from '../types';
 import { recalculateFullComputation } from '../utils/taxCalculator';
+import { getReadableErrorMessage, toSafeString } from '../utils/safeFormat';
 
 interface AiDocumentScannerModalProps {
   isOpen: boolean;
@@ -221,16 +222,52 @@ export const AiDocumentScannerModal: React.FC<AiDocumentScannerModalProps> = ({
       }
 
       if (!res.ok || !json.success) {
-        throw new Error(json.error || 'AI ਦੁਆਰਾ ਦਸਤਾਵੇਜ਼ ਸਕੈਨ ਕਰਨ ਵਿੱਚ ਅਸਮਰੱਥ।');
+        throw new Error(getReadableErrorMessage(json.error ?? json, 'AI ਦੁਆਰਾ ਦਸਤਾਵੇਜ਼ ਸਕੈਨ ਕਰਨ ਵਿੱਚ ਅਸਮਰੱਥ।'));
       }
 
-      setExtractedData(json.data);
+      const raw = json.data && typeof json.data === 'object' ? json.data : {};
+      const rawGender = toSafeString(raw.gender).trim().toLowerCase();
+      const normalizedGender: ExtractedKycData['gender'] =
+        rawGender === 'female'
+          ? 'Female'
+          : rawGender === 'senior citizen'
+          ? 'Senior Citizen'
+          : rawGender === 'male'
+          ? 'Male'
+          : undefined;
+      const sanitized: ExtractedKycData = {
+        name: toSafeString(raw.name) || undefined,
+        fatherName: toSafeString(raw.fatherName) || undefined,
+        pan: toSafeString(raw.pan) || undefined,
+        aadhaarNumber: toSafeString(raw.aadhaarNumber) || undefined,
+        dob: toSafeString(raw.dob) || undefined,
+        gender: normalizedGender,
+        mobile: toSafeString(raw.mobile) || undefined,
+        email: toSafeString(raw.email) || undefined,
+        address: toSafeString(raw.address) || undefined,
+        pincode: toSafeString(raw.pincode) || undefined,
+        state: toSafeString(raw.state) || undefined,
+        bankName: toSafeString(raw.bankName) || undefined,
+        accountNumber: toSafeString(raw.accountNumber) || undefined,
+        ifscCode: toSafeString(raw.ifscCode) || undefined,
+        branchName: toSafeString(raw.branchName) || undefined,
+        placeOfFiling: toSafeString(raw.placeOfFiling) || undefined,
+        documentTypesDetected: Array.isArray(raw.documentTypesDetected)
+          ? raw.documentTypesDetected.map((d: unknown) => toSafeString(d).trim()).filter(Boolean)
+          : undefined,
+        summaryNotes: toSafeString(raw.summaryNotes) || undefined,
+      };
+
+      setExtractedData(sanitized);
       setStep('preview');
       setSuccessMessage('✓ AI ਦੁਆਰਾ ਸਾਰਾ ਡਾਟਾ ਸਫਲਤਾਪੂਰਵਕ ਪੜ੍ਹ ਲਿਆ ਗਿਆ ਹੈ!');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('OCR Error:', err);
       setErrorMessage(
-        err.message || 'ਸਰਵਰ ਨਾਲ ਸੰਪਰਕ ਕਰਨ ਵਿੱਚ ਸਮੱਸਿਆ ਆਈ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।'
+        getReadableErrorMessage(
+          err,
+          'ਸਰਵਰ ਨਾਲ ਸੰਪਰਕ ਕਰਨ ਵਿੱਚ ਸਮੱਸਿਆ ਆਈ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।'
+        )
       );
     } finally {
       setIsProcessing(false);
@@ -267,22 +304,22 @@ export const AiDocumentScannerModal: React.FC<AiDocumentScannerModalProps> = ({
 
     const updatedClient: ClientDetails = {
       ...computation.client,
-      name: extractedData.name ? extractedData.name.toUpperCase() : computation.client.name,
-      fatherName: extractedData.fatherName ? extractedData.fatherName.toUpperCase() : computation.client.fatherName,
-      pan: extractedData.pan ? extractedData.pan.toUpperCase() : computation.client.pan,
-      aadhaarNumber: extractedData.aadhaarNumber || computation.client.aadhaarNumber,
-      dob: extractedData.dob || computation.client.dob,
-      gender: extractedData.gender || computation.client.gender || 'Male',
-      address: extractedData.address ? extractedData.address.toUpperCase() : computation.client.address,
-      pincode: extractedData.pincode || computation.client.pincode,
-      state: extractedData.state || computation.client.state || 'PUNJAB',
-      bankName: extractedData.bankName || computation.client.bankName,
-      accountNumber: extractedData.accountNumber || computation.client.accountNumber,
-      ifscCode: extractedData.ifscCode ? extractedData.ifscCode.toUpperCase() : computation.client.ifscCode,
-      branchName: extractedData.branchName || computation.client.branchName,
-      mobile: extractedData.mobile || computation.client.mobile,
-      email: extractedData.email || computation.client.email,
-      placeOfFiling: extractedData.placeOfFiling || computation.client.placeOfFiling,
+      name: extractedData.name ? toSafeString(extractedData.name).toUpperCase() : computation.client.name,
+      fatherName: extractedData.fatherName ? toSafeString(extractedData.fatherName).toUpperCase() : computation.client.fatherName,
+      pan: extractedData.pan ? toSafeString(extractedData.pan).toUpperCase() : computation.client.pan,
+      aadhaarNumber: toSafeString(extractedData.aadhaarNumber) || computation.client.aadhaarNumber,
+      dob: toSafeString(extractedData.dob) || computation.client.dob,
+      gender: (toSafeString(extractedData.gender) as any) || computation.client.gender || 'Male',
+      address: extractedData.address ? toSafeString(extractedData.address).toUpperCase() : computation.client.address,
+      pincode: toSafeString(extractedData.pincode) || computation.client.pincode,
+      state: toSafeString(extractedData.state) || computation.client.state || 'PUNJAB',
+      bankName: toSafeString(extractedData.bankName) || computation.client.bankName,
+      accountNumber: toSafeString(extractedData.accountNumber) || computation.client.accountNumber,
+      ifscCode: extractedData.ifscCode ? toSafeString(extractedData.ifscCode).toUpperCase() : computation.client.ifscCode,
+      branchName: toSafeString(extractedData.branchName) || computation.client.branchName,
+      mobile: toSafeString(extractedData.mobile) || computation.client.mobile,
+      email: toSafeString(extractedData.email) || computation.client.email,
+      placeOfFiling: toSafeString(extractedData.placeOfFiling) || computation.client.placeOfFiling,
     };
 
     const sourceTracking = { ...(computation.sourceTracking || {}) };

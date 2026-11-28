@@ -12,6 +12,7 @@ import {
   checkEmploymentPeriodOverlap, 
   detectDuplicateSalaryEntries 
 } from '../utils/taxCalculator';
+import { getReadableErrorMessage } from '../utils/safeFormat';
 
 interface SalaryListEditorProps {
   salary: SalaryDetails;
@@ -297,8 +298,8 @@ export const SalaryListEditor: React.FC<SalaryListEditorProps> = ({
         id: salaryId,
         msg: `Successfully imported Form 16 for ${f16EmpName || 'Employer'} (Gross: ₹${f16Gross.toLocaleString('en-IN')}, TDS: ₹${f16TDS.toLocaleString('en-IN')})`,
       });
-    } catch (err: any) {
-      alert(`Error extracting Form 16: ${err.message || 'Unknown error'}`);
+    } catch (err: unknown) {
+      alert(`Error extracting Form 16: ${getReadableErrorMessage(err, 'Unknown error')}`);
     } finally {
       setUploadingId(null);
     }

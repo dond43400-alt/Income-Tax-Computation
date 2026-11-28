@@ -23,6 +23,7 @@ import {
 import { TaxComputation, ClientDetails } from '../types';
 import { recalculateFullComputation } from '../utils/taxCalculator';
 import { formatINR } from '../utils/pdfGenerator';
+import { toSafeString } from '../utils/safeFormat';
 
 interface IncomeTaxPortalSyncModalProps {
   isOpen: boolean;
@@ -122,27 +123,33 @@ export const IncomeTaxPortalSyncModal: React.FC<IncomeTaxPortalSyncModalProps> =
         const taxComputation = root.TaxComputation || root.taxComputation || {};
         const bankDetails = root.BankDetails || root.bankDetails || root.BankAccountDetails || {};
 
-        const extractedPan = personalInfo.PAN || root.PAN || computation.client.pan;
-        const extractedName = (personalInfo.AssesseeName?.FirstName || '') + ' ' + (personalInfo.AssesseeName?.SurNameOrOrgName || personalInfo.Name || computation.client.name);
-        const extractedAadhaar = personalInfo.AadhaarCardNo || computation.client.aadhaarNumber;
-        const extractedDob = personalInfo.DOB || computation.client.dob;
+        const extractedPan = toSafeString(personalInfo.PAN || root.PAN) || computation.client.pan;
+        const extractedName =
+          toSafeString(personalInfo.AssesseeName) ||
+          toSafeString(personalInfo.Name) ||
+          computation.client.name;
+        const extractedAadhaar = toSafeString(personalInfo.AadhaarCardNo) || computation.client.aadhaarNumber;
+        const extractedDob = toSafeString(personalInfo.DOB) || computation.client.dob;
         const extractedGender = personalInfo.Gender === 'F' ? 'Female' : 'Male';
-        const extractedAddress = personalInfo.Address?.PremiseName || personalInfo.Address?.ResidenceNo || computation.client.address;
-        const extractedPincode = personalInfo.Address?.PinCode || computation.client.pincode;
+        const extractedAddress =
+          toSafeString(personalInfo.Address?.PremiseName || personalInfo.Address?.ResidenceNo || personalInfo.Address) ||
+          computation.client.address;
+        const extractedPincode = toSafeString(personalInfo.Address?.PinCode) || computation.client.pincode;
+        const extractedAck = toSafeString(root.AckNum || root.acknowledgementNumber) || computation.acknowledgementNumber;
 
         const updatedComp = recalculateFullComputation({
           ...computation,
           client: {
             ...computation.client,
-            pan: (extractedPan || computation.client.pan).toUpperCase(),
-            name: (extractedName || computation.client.name).trim().toUpperCase(),
+            pan: toSafeString(extractedPan || computation.client.pan).toUpperCase(),
+            name: toSafeString(extractedName || computation.client.name).trim().toUpperCase(),
             aadhaarNumber: extractedAadhaar || computation.client.aadhaarNumber,
             dob: extractedDob || computation.client.dob,
             gender: extractedGender as any,
             address: extractedAddress || computation.client.address,
             pincode: extractedPincode || computation.client.pincode,
           },
-          acknowledgementNumber: root.AckNum || root.acknowledgementNumber || computation.acknowledgementNumber,
+          acknowledgementNumber: extractedAck,
         });
 
         onUpdateComputation(updatedComp);

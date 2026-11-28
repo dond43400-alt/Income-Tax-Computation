@@ -12,6 +12,58 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+  const extractServerErrorMessage = (
+    err: unknown,
+    fallback: string = "An unexpected error occurred."
+  ): string => {
+    if (err === null || err === undefined) return fallback;
+    if (typeof err === "string") {
+      const t = err.trim();
+      if (!t || t.toLowerCase() === "[object object]") return fallback;
+      if (t.startsWith("{") && t.endsWith("}")) {
+        try {
+          return extractServerErrorMessage(JSON.parse(t), fallback);
+        } catch {
+          return t;
+        }
+      }
+      return t;
+    }
+    if (err instanceof Error) {
+      const msg = typeof err.message === "string" ? err.message.trim() : "";
+      if (msg && msg.toLowerCase() !== "[object object]") {
+        if (msg.startsWith("{") && msg.endsWith("}")) {
+          try {
+            return extractServerErrorMessage(JSON.parse(msg), fallback);
+          } catch {
+            return msg;
+          }
+        }
+        return msg;
+      }
+      const nested = (err as any).error ?? (err as any).cause ?? (err as any).details;
+      if (nested) return extractServerErrorMessage(nested, fallback);
+      return fallback;
+    }
+    if (typeof err === "object") {
+      const obj = err as Record<string, unknown>;
+      for (const k of ["error", "message", "detail", "details", "statusText", "reason"]) {
+        if (k in obj && obj[k] !== undefined && obj[k] !== null) {
+          const cand = extractServerErrorMessage(obj[k], "");
+          if (cand) return cand;
+        }
+      }
+      try {
+        const json = JSON.stringify(obj);
+        if (json && json !== "{}") return json;
+      } catch {
+        // ignore
+      }
+      return fallback;
+    }
+    return fallback;
+  };
+
   // Helper to get Gemini Client safely
   const getGeminiClient = () => {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -44,10 +96,10 @@ async function startServer() {
       let ai: GoogleGenAI;
       try {
         ai = getGeminiClient();
-      } catch (keyErr: any) {
+      } catch (keyErr: unknown) {
         return res.status(400).json({
           success: false,
-          error: keyErr.message || "GEMINI_API_KEY is missing.",
+          error: extractServerErrorMessage(keyErr, "GEMINI_API_KEY is missing."),
         });
       }
 
@@ -172,10 +224,11 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
               lastError = null;
               break;
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
             lastError = err;
-            const isUnavailable = err.message?.includes("503") || err.message?.includes("UNAVAILABLE") || err.message?.includes("high demand");
-            console.warn(`Model ${modelName} attempt ${attempt} failed: ${err.message}`);
+            const errMsg = extractServerErrorMessage(err, "Unknown Gemini error");
+            const isUnavailable = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand");
+            console.warn(`Model ${modelName} attempt ${attempt} failed: ${errMsg}`);
             
             if (isUnavailable && attempt < 2) {
               // Wait 1.2s before retry on the same model
@@ -193,7 +246,10 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
 
       if (!rawText || lastError) {
         throw new Error(
-          lastError?.message || "All Gemini models are temporarily experiencing high traffic. Please try again in a few moments."
+          extractServerErrorMessage(
+            lastError,
+            "All Gemini models are temporarily experiencing high traffic. Please try again in a few moments."
+          )
         );
       }
       let extractedJson: any = {};
@@ -206,11 +262,11 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
       }
 
       return res.json({ success: true, data: extractedJson });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("OCR Document Extraction Error:", error);
       return res.status(500).json({
         success: false,
-        error: error.message || "Failed to extract information from document photos.",
+        error: extractServerErrorMessage(error, "Failed to extract information from document photos."),
       });
     }
   });
@@ -238,8 +294,11 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
         message: "Income tax portal data synchronized successfully",
         data: parsedData,
       });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+    } catch (err: unknown) {
+      return res.status(500).json({
+        success: false,
+        error: extractServerErrorMessage(err, "Failed to sync portal data."),
+      });
     }
   });
 
@@ -254,10 +313,10 @@ Ensure 100% accuracy. Do not make up information not present in the images.`;
       let ai: GoogleGenAI;
       try {
         ai = getGeminiClient();
-      } catch (keyErr: any) {
+      } catch (keyErr: unknown) {
         return res.status(400).json({
           success: false,
-          error: keyErr.message || "GEMINI_API_KEY is missing.",
+          error: extractServerErrorMessage(keyErr, "GEMINI_API_KEY is missing."),
         });
       }
 
@@ -393,14 +452,14 @@ CRITICAL ACCURACY RULES (ZERO FABRICATION):
             lastError = null;
             break;
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           lastError = err;
-          console.warn(`Challan OCR model ${modelName} failed:`, err.message);
+          console.warn(`Challan OCR model ${modelName} failed:`, extractServerErrorMessage(err, "Unknown error"));
         }
       }
 
       if (!rawJsonText || lastError) {
-        throw new Error(lastError?.message || "Failed to extract challan details via Gemini OCR.");
+        throw new Error(extractServerErrorMessage(lastError, "Failed to extract challan details via Gemini OCR."));
       }
 
       let parsed: any = {};
@@ -412,11 +471,11 @@ CRITICAL ACCURACY RULES (ZERO FABRICATION):
       }
 
       return res.json({ success: true, data: parsed });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Challan OCR Extraction Error:", error);
       return res.status(500).json({
         success: false,
-        error: error.message || "Failed to extract challan details from document.",
+        error: extractServerErrorMessage(error, "Failed to extract challan details from document."),
       });
     }
   });
@@ -431,11 +490,11 @@ CRITICAL ACCURACY RULES (ZERO FABRICATION):
   });
 
   // Global JSON Error Handler to ensure API routes always return JSON (never HTML)
-  app.use("/api", (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  app.use("/api", (err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error("API Route Error:", err);
     res.status(500).json({
       success: false,
-      error: err.message || "An unexpected error occurred while processing the request.",
+      error: extractServerErrorMessage(err, "An unexpected error occurred while processing the request."),
     });
   });
 

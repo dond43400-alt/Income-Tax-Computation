@@ -27,6 +27,7 @@ import {
   createAuditEntry,
   extractChallansFromJsonContent,
 } from '../utils/challanEngine';
+import { getReadableErrorMessage, toSafeString } from '../utils/safeFormat';
 
 // Ensure pdfjs worker is configured consistently with existing pdfParser
 if (typeof window !== 'undefined' && !(pdfjsLib as any).GlobalWorkerOptions.workerSrc) {
@@ -123,24 +124,29 @@ export const ChallanExtractionModal: React.FC<ChallanExtractionModalProps> = ({
 
       const rawAy = normalizeNotFound(item.assessmentYear);
       const ayVal = isMissingField(rawAy) ? defaultAy || 'Not Found' : rawAy;
-      const fyVal = !isMissingField(item.financialYear)
-        ? String(item.financialYear)
+      const rawFy = normalizeNotFound(item.financialYear);
+      const fyVal = !isMissingField(rawFy)
+        ? rawFy
         : !isMissingField(ayVal)
         ? getFinancialYearFromAY(ayVal)
         : defaultFy || 'Not Found';
 
+      const recPan = normalizeNotFound(item.pan);
+      const recName = normalizeNotFound(item.assesseeName);
+      const recForm = normalizeNotFound(item.challanForm);
+
       const rec: TaxChallanRecord = {
         id: `ch_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
-        pan: !isMissingField(item.pan) ? String(item.pan).toUpperCase() : defaultPan ? defaultPan.toUpperCase() : 'Not Found',
-        assesseeName: !isMissingField(item.assesseeName)
-          ? String(item.assesseeName).toUpperCase()
+        pan: !isMissingField(recPan) ? recPan.toUpperCase() : defaultPan ? defaultPan.toUpperCase() : 'Not Found',
+        assesseeName: !isMissingField(recName)
+          ? recName.toUpperCase()
           : defaultName
           ? defaultName.toUpperCase()
           : 'Not Found',
         assessmentYear: ayVal,
         financialYear: fyVal,
         challanType,
-        challanForm: normalizeNotFound(item.challanForm) !== 'Not Found' ? item.challanForm : docType || 'ITNS 280',
+        challanForm: recForm !== 'Not Found' ? recForm : toSafeString(docType).trim() || 'ITNS 280',
         challanSerialNumber: normalizeNotFound(item.challanSerialNumber),
         bsrCode: normalizeNotFound(item.bsrCode),
         challanTenderDate: normalizeNotFound(item.challanTenderDate),
@@ -327,23 +333,24 @@ export const ChallanExtractionModal: React.FC<ChallanExtractionModalProps> = ({
       }
 
       if (!resp.ok || !json.success) {
-        throw new Error(json.error || 'OCR extraction failed.');
+        throw new Error(getReadableErrorMessage(json.error ?? json, 'OCR extraction failed.'));
       }
 
       const data = json.data || {};
       const list = Array.isArray(data.challans) ? data.challans : [];
-      setDetectedDocType(data.detectedDocumentType || 'Tax Document');
-      setExtractionNotes(data.extractionNotes || '');
+      const docTypeStr = toSafeString(data.detectedDocumentType).trim() || 'Tax Document';
+      setDetectedDocType(docTypeStr);
+      setExtractionNotes(toSafeString(data.extractionNotes));
 
       if (list.length === 0) {
         setErrorMessage(
           'No challan or tax payment records could be detected in this document. You can add a manual entry below if needed.'
         );
       } else {
-        setExtractedRows(enrichExtractedRows(list, data.detectedDocumentType || 'Uploaded Receipt', file.name));
+        setExtractedRows(enrichExtractedRows(list, docTypeStr, file.name));
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to extract challan data.');
+    } catch (err: unknown) {
+      setErrorMessage(getReadableErrorMessage(err, 'Failed to extract challan data.'));
     } finally {
       setIsExtracting(false);
       setStatusMessage('');

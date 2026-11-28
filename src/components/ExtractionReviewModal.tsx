@@ -25,6 +25,7 @@ import {
   ExtractionCategory 
 } from '../types';
 import { recalculateFullComputation } from '../utils/taxCalculator';
+import { toSafeString } from '../utils/safeFormat';
 
 interface ExtractionReviewModalProps {
   isOpen: boolean;
@@ -95,7 +96,7 @@ export const ExtractionReviewModal: React.FC<ExtractionReviewModalProps> = ({
   // Start inline editing
   const handleStartEdit = (f: ExtractedFieldItem) => {
     setEditingFieldId(f.id);
-    setTempEditValue(f.editedValue !== null && f.editedValue !== undefined ? String(f.editedValue) : '');
+    setTempEditValue(f.editedValue !== null && f.editedValue !== undefined ? toSafeString(f.editedValue) : '');
   };
 
   // Save inline edit
@@ -389,14 +390,14 @@ export const ExtractionReviewModal: React.FC<ExtractionReviewModalProps> = ({
                   if (f.detected && f.value !== null && f.value !== undefined) {
                     displayExtracted = typeof f.value === 'number'
                       ? `₹${Number(f.value).toLocaleString('en-IN')}`
-                      : String(f.value);
+                      : toSafeString(f.value) || 'Not Detected';
                   }
 
                   let displayCurrent = '—';
                   if (curVal !== null && curVal !== undefined && curVal !== '') {
                     displayCurrent = typeof curVal === 'number'
                       ? `₹${Number(curVal).toLocaleString('en-IN')}`
-                      : String(curVal);
+                      : toSafeString(curVal) || '—';
                   }
 
                   return (

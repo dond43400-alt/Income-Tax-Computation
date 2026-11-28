@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { TaxComputation, FirmDetails, SalaryEntry, TaxChallanRecord } from '../types';
 import { computeTaxPaymentSettlement, normalizeNotFound } from './challanEngine';
+import { getReadableErrorMessage } from './safeFormat';
 
 export function formatINR(val?: number): string {
   if (val === undefined || isNaN(val)) return '₹0';
@@ -2096,9 +2097,9 @@ export function generateComputationPdf(comp: TaxComputation, firm: FirmDetails):
     const safeName = (comp.client.name || 'Client').replace(/[^a-zA-Z0-9]/g, '_');
     const fileName = `Computation_${comp.client.pan || 'PAN'}_${comp.assessmentYear || 'AY'}_${safeName}.pdf`;
     doc.save(fileName);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Computation PDF Export Error:', err);
-    alert(`PDF Export Failed: ${err?.message || 'An unexpected error occurred while generating the PDF.'}`);
+    alert(`PDF Export Failed: ${getReadableErrorMessage(err, 'An unexpected error occurred while generating the PDF.')}`);
   }
 }
 
