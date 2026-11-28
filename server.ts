@@ -1,12 +1,12 @@
 import "dotenv/config";
 import express from "express";
+import fs from "fs";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // High payload limit for document photos & passbook images
   app.use(express.json({ limit: "50mb" }));
@@ -492,24 +492,32 @@ CRITICAL ACCURACY RULES (ZERO FABRICATION):
   // Global JSON Error Handler to ensure API routes always return JSON (never HTML)
   app.use("/api", (err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error("API Route Error:", err);
-    res.status(500).json({
+    const status = Number((err as any)?.status || (err as any)?.statusCode) || 500;
+    res.status(status).json({
       success: false,
       error: extractServerErrorMessage(err, "An unexpected error occurred while processing the request."),
     });
   });
 
   // Vite middleware for development & Static serving in production
-  if (process.env.NODE_ENV !== "production") {
+  const isProd = process.env.NODE_ENV === "production";
+  const distPath = path.resolve(process.cwd(), "dist");
+  const distIndexPath = path.join(distPath, "index.html");
+
+  if (!isProd) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      if (fs.existsSync(distIndexPath)) {
+        return res.sendFile(distIndexPath);
+      }
+      return res.status(404).send("Application build not found. Please run npm run build.");
     });
   }
 
